@@ -50,6 +50,8 @@ You **cannot** run heavy analytics on the live transactional DB — it would slo
 <a name="arch"></a>
 ## 2. Architecture & Data Flow
 
+![Architecture diagram](architecture.svg)
+
 ```
  data-geneator/faker_generator.py        ← generates fake banking data
         │  INSERT
@@ -483,6 +485,7 @@ Mac is the building, `localhost` is the address, the port is the flat number).
 |---|---|---|---|
 | **8080** | **Airflow** web UI | the "manager" dashboard — run/see pipelines | browser → http://localhost:8080 |
 | **9001** | **MinIO** console | the data-lake web UI — browse your Parquet files | browser → http://localhost:9001 |
+| **8085** | **Kafka UI** | clickable view of topics + messages | browser → http://localhost:8085 |
 | **9000** | **MinIO** API (S3) | the *machine* door (code uploads here, not for humans) | code only (`boto3`) |
 | **8083** | **Debezium** Connect | the CDC engine's REST API | browser/curl → http://localhost:8083/connectors |
 | **5432** | **Postgres** (banking) | your source database (OLTP) | DBeaver → localhost:5432 |
@@ -604,8 +607,15 @@ customers/date=2026-06-14/
 
 ### 📨 15.4 Kafka — the streaming bus (port 29092)
 
-**Important:** in this project Kafka has **no built-in web UI** (we didn't add one). You explore it with
-**commands** that run *inside* the Kafka container. Here's what each shows you:
+**Two ways to explore Kafka:** the new **Kafka UI** (clickable) *and* the command line.
+
+**🖱️ Kafka UI — open http://localhost:8085.** You'll see:
+- **Brokers** → the Kafka server's health.
+- **Topics** → click to see `banking_server.public.customers` / `.accounts` / `.transactions`, their message counts, and **click a topic → "Messages"** to read the actual change events in your browser (no commands needed).
+- **Consumers** → the `minio-landing-group` and its **lag** (how far behind it is).
+- **Kafka Connect** → the Debezium `postgres-connector` and its status.
+
+**⌨️ Or use commands** that run *inside* the Kafka container:
 
 **See the topics (the "channels"):**
 ```bash

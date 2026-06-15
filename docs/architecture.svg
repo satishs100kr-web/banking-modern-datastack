@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 460" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1117"/><stop offset="1" stop-color="#161b22"/>
+    </linearGradient>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#58a6ff"/>
+    </marker>
+    <style>
+      .box{rx:12;ry:12;stroke-width:1.5}
+      .t{fill:#e6edf3;font-size:15px;font-weight:600}
+      .s{fill:#8b949e;font-size:11.5px}
+      .lbl{fill:#58a6ff;font-size:11px;font-weight:600}
+      .stage{fill:#6e7681;font-size:11px;font-weight:700;letter-spacing:.06em}
+    </style>
+  </defs>
+
+  <rect width="1180" height="460" fill="url(#bg)"/>
+  <text x="30" y="42" fill="#e6edf3" font-size="24" font-weight="700">🏦 Banking Modern Data Stack</text>
+  <text x="30" y="66" class="s" font-size="13">Real-time CDC pipeline · Postgres → Debezium/Kafka → MinIO → Airflow → Snowflake → dbt → Power BI</text>
+
+  <!-- Row 1 -->
+  <!-- Generator -->
+  <g transform="translate(30,110)">
+    <rect class="box" width="150" height="78" fill="#1f2937" stroke="#3b82f6"/>
+    <text x="14" y="28" class="t">🐍 Faker</text>
+    <text x="14" y="48" class="s">faker_generator.py</text>
+    <text x="14" y="66" class="s">generates fake data</text>
+    <text x="0" y="-8" class="stage">1 · GENERATE</text>
+  </g>
+  <line x1="180" y1="149" x2="222" y2="149" stroke="#58a6ff" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Postgres -->
+  <g transform="translate(225,110)">
+    <rect class="box" width="160" height="78" fill="#1e293b" stroke="#38bdf8"/>
+    <text x="14" y="28" class="t">🐘 PostgreSQL</text>
+    <text x="14" y="48" class="s">OLTP source · :5432</text>
+    <text x="14" y="66" class="s">wal_level = logical</text>
+    <text x="0" y="-8" class="stage">2 · STORE</text>
+  </g>
+  <line x1="385" y1="149" x2="427" y2="149" stroke="#58a6ff" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="388" y="142" class="lbl">CDC</text>
+
+  <!-- Debezium + Kafka -->
+  <g transform="translate(430,110)">
+    <rect class="box" width="180" height="78" fill="#262040" stroke="#a78bfa"/>
+    <text x="14" y="28" class="t">🔌 Debezium + Kafka</text>
+    <text x="14" y="48" class="s">CDC stream · :8083 / :29092</text>
+    <text x="14" y="66" class="s">topic per table</text>
+    <text x="0" y="-8" class="stage">3 · STREAM</text>
+  </g>
+  <line x1="610" y1="149" x2="652" y2="149" stroke="#58a6ff" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- MinIO -->
+  <g transform="translate(655,110)">
+    <rect class="box" width="160" height="78" fill="#3a2417" stroke="#f59e0b"/>
+    <text x="14" y="28" class="t">🪣 MinIO</text>
+    <text x="14" y="48" class="s">data lake · :9001</text>
+    <text x="14" y="66" class="s">Parquet, batched 50</text>
+    <text x="0" y="-8" class="stage">4 · LAND</text>
+  </g>
+  <line x1="815" y1="149" x2="857" y2="149" stroke="#58a6ff" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Airflow -->
+  <g transform="translate(860,110)">
+    <rect class="box" width="160" height="78" fill="#0f2f2a" stroke="#2dd4bf"/>
+    <text x="14" y="28" class="t">🌬️ Airflow</text>
+    <text x="14" y="48" class="s">orchestrator · :8080</text>
+    <text x="14" y="66" class="s">PUT + COPY INTO</text>
+    <text x="0" y="-8" class="stage">5 · ORCHESTRATE</text>
+  </g>
+
+  <!-- down arrow -->
+  <line x1="940" y1="188" x2="940" y2="248" stroke="#58a6ff" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Row 2 (right to left) -->
+  <!-- Snowflake RAW -->
+  <g transform="translate(820,255)">
+    <rect class="box" width="200" height="78" fill="#10263f" stroke="#60a5fa"/>
+    <text x="14" y="28" class="t">❄️ Snowflake · RAW</text>
+    <text x="14" y="48" class="s">bronze tier (OLAP)</text>
+    <text x="14" y="66" class="s">variant column "v"</text>
+    <text x="0" y="-8" class="stage">5 · LOAD</text>
+  </g>
+  <line x1="818" y1="294" x2="776" y2="294" stroke="#58a6ff" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- dbt -->
+  <g transform="translate(560,255)">
+    <rect class="box" width="215" height="78" fill="#3a1d2b" stroke="#fb7185"/>
+    <text x="14" y="28" class="t">🔧 dbt transforms</text>
+    <text x="14" y="48" class="s">staging → snapshots (SCD2)</text>
+    <text x="14" y="66" class="s">→ dim / fact (star schema)</text>
+    <text x="0" y="-8" class="stage">5 · TRANSFORM</text>
+  </g>
+  <line x1="558" y1="294" x2="516" y2="294" stroke="#58a6ff" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Analytics -->
+  <g transform="translate(345,255)">
+    <rect class="box" width="170" height="78" fill="#10263f" stroke="#60a5fa"/>
+    <text x="14" y="28" class="t">❄️ ANALYTICS</text>
+    <text x="14" y="48" class="s">gold · business-ready</text>
+    <text x="14" y="66" class="s">dim_/fact_ tables</text>
+  </g>
+  <line x1="343" y1="294" x2="301" y2="294" stroke="#58a6ff" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Power BI -->
+  <g transform="translate(140,255)">
+    <rect class="box" width="160" height="78" fill="#3a2f0f" stroke="#facc15"/>
+    <text x="14" y="28" class="t">📊 Power BI</text>
+    <text x="14" y="48" class="s">direct query (live)</text>
+    <text x="14" y="66" class="s">dashboards</text>
+    <text x="0" y="-8" class="stage">6 · VISUALIZE</text>
+  </g>
+
+  <!-- cross-cutting -->
+  <rect x="30" y="375" width="1120" height="60" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <text x="48" y="400" class="lbl" font-size="12">CROSS-CUTTING</text>
+  <text x="48" y="421" class="s" font-size="12.5">🐳 Docker Compose packages every service  ·  🔐 secrets in .env + Snowflake key-pair (JWT) auth  ·  ⚙️ GitHub Actions CI/CD lints + dbt compile on push</text>
+</svg>

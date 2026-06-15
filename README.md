@@ -9,6 +9,8 @@ Change Data Capture, a data lake, a cloud warehouse, SCD2 history, orchestration
 
 ## 🏗️ Architecture
 
+![Architecture diagram](docs/architecture.svg)
+
 ```
  faker_generator.py  →  PostgreSQL (OLTP)
         │  Debezium captures every change (CDC) via the write-ahead log

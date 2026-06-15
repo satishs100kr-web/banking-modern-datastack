@@ -27,6 +27,21 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
 
+  # Clickable web UI for Kafka — browse topics + messages at http://localhost:8085
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8085:8080"           # host 8085 → UI (avoids clashing with Airflow's 8080)
+    environment:
+      KAFKA_CLUSTERS_0_NAME: banking
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
+      DYNAMIC_CONFIG_ENABLED: 'true'
+
 
   connect:
     image: debezium/connect:2.7.3.Final
