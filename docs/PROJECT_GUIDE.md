@@ -25,6 +25,9 @@
 11. [Concepts Glossary](#glossary)
 12. [Interview Questions](#interview)
 13. [Top 10 Lessons](#lessons)
+14. [🔌 Ports & URLs — what's where](#ports)
+15. [🖥️ Exploring Every Tool (click-by-click)](#explore)
+16. [🧭 Follow ONE row through the pipeline](#trace)
 
 ---
 
@@ -466,6 +469,256 @@ Defines: `zookeeper` → `kafka` → `connect` (Debezium) → `postgres` (`wal_l
 8. **Snowflake `private_key` needs DER bytes** + proper PEM framing.
 9. **`dbt build`, not `dbt run`**, whenever snapshots/tests exist.
 10. **`.gitignore` only works on untracked files** — `git rm --cached` to fix leaks.
+
+---
+
+<a name="ports"></a>
+## 14. 🔌 Ports & URLs — what's running where
+
+Every tool runs inside its own Docker container and "opens a door" (a **port**) so you can reach it
+from your Mac's browser or terminal. Think of ports like **apartment numbers in one building** (your
+Mac is the building, `localhost` is the address, the port is the flat number).
+
+| Port | Tool | What it is | Open it with |
+|---|---|---|---|
+| **8080** | **Airflow** web UI | the "manager" dashboard — run/see pipelines | browser → http://localhost:8080 |
+| **9001** | **MinIO** console | the data-lake web UI — browse your Parquet files | browser → http://localhost:9001 |
+| **9000** | **MinIO** API (S3) | the *machine* door (code uploads here, not for humans) | code only (`boto3`) |
+| **8083** | **Debezium** Connect | the CDC engine's REST API | browser/curl → http://localhost:8083/connectors |
+| **5432** | **Postgres** (banking) | your source database (OLTP) | DBeaver → localhost:5432 |
+| **5433** | **Postgres** (airflow) | Airflow's *own* private database | (internal — don't touch) |
+| **29092** | **Kafka** (host access) | the streaming bus, reachable from your Mac | code → `host.docker.internal:29092` |
+| **9092** | **Kafka** (internal) | the streaming bus, reachable *between containers* | containers → `kafka:9092` |
+| **2181** | **Zookeeper** | Kafka's helper (keeps Kafka organized) | (internal — don't touch) |
+| — | **Snowflake** | the cloud warehouse (not in Docker) | https://app.snowflake.com |
+
+> 🔑 **Why two ports for Kafka (9092 + 29092) and two Postgres (5432 + 5433)?**
+> - Kafka: **9092** is for containers talking to each other (use name `kafka`); **29092** is for *your Mac* (use `host.docker.internal`). Same Kafka, two doors for two kinds of visitors.
+> - Postgres: **5432** is your *banking* data; **5433** is Airflow's *own* bookkeeping DB. Two separate databases, two doors, so they never clash.
+
+---
+
+<a name="explore"></a>
+## 15. 🖥️ Exploring Every Tool — click-by-click (explained like you're five)
+
+This is the "open it and look around" tour. For each tool: **what to open → what you'll see → what it means.**
+
+### 🐳 15.1 Docker Desktop — the control room for all containers
+
+**Open it:** the Docker Desktop app → click **Containers** in the left menu.
+
+**What you'll see:** a list grouped under **`bank_de_project`**, each row a container:
+```
+bank_de_project
+  ● airflow-scheduler     Running   8080→…
+  ● airflow-webserver     Running   8080:8080
+  ● kafka                 Running   29092:29092
+  ● bank_de_project-postgres-1   Running   5432:5432
+  ● bank_de_project-minio-1      Running   9000:9000, 9001:9001
+  ● bank_de_project-connect-1    Running   8083:8083
+  ● bank_de_project-zookeeper-1  Running   2181:2181
+  ○ airflow-init          Exited (0)
+```
+**What it means:**
+- **Green dot ●** = the container is **running** (healthy). You want these green.
+- **Grey/hollow dot ○ "Exited"** = the container **finished its one job and stopped**. `airflow-init` is *supposed* to be exited — it created the Airflow tables once and quit. (Don't restart it.)
+- The **`PORT:PORT`** numbers are the doors. Click the blue port link (e.g. `9001:9001`) and Docker opens that UI in your browser.
+- Click any row → **Logs** tab = the container's diary (errors show here). **Exec** tab = a terminal *inside* the container.
+
+> 🧒 **Like a child:** Docker Desktop is the **dashboard of a spaceship**. Each container is a crew member with a job. Green light = awake and working. Grey light = finished their task and went to sleep (fine for the "setup" crew member).
+
+---
+
+### 🌬️ 15.2 Airflow — the pipeline manager (port 8080)
+
+**Open it:** http://localhost:8080 → log in **admin / admin**.
+
+**Screen 1 — the DAGs list (home page).** You'll see a table of pipelines:
+```
+  ☐ ⏯  minio_to_snowflake_banking   ●●●●○   */1 * * * *   ...
+  ☐ ⏯  SCD2_snapshots               ●●●●●   @daily        ...
+```
+**What it means:**
+- Each **row = one pipeline (DAG)**. `minio_to_snowflake_banking` loads MinIO → Snowflake.
+- The **toggle on the left** turns a DAG **On/Off** (paused DAGs don't run). Turn it **On** to start scheduling.
+- The little **colored circles** = recent runs: 🟢 green = success, 🔴 red = failed, 🟡 yellow = running.
+- The **cron text** (`*/1 * * * *`) = the schedule ("every minute").
+
+**Screen 2 — click a DAG name → you land on "Grid" view.**
+```
+            run1  run2  run3  run4
+download_minio  🟢   🟢   🔴   🟢
+load_snowflake  🟢   🟢   ⬜   🟢
+```
+- **Columns = runs over time** (left = older). **Rows = tasks** in the pipeline.
+- A **red square = that task failed** in that run. A **white/grey square** = it was skipped (because the task before it failed).
+- **Click a red square → a panel opens → click "Logs".** Scroll to the **bottom** — the real error is the last few lines. *(This is exactly how we found the `password is empty` and `MalformedFraming` errors.)*
+
+**Screen 3 — the "Graph" tab** (top of a DAG page): shows the tasks as boxes with arrows:
+```
+[ download_minio ] ──▶ [ load_snowflake ]
+```
+- Arrows = order. `load_snowflake` only starts after `download_minio` succeeds.
+- Green border = success, red = failed.
+
+**Buttons you'll use most:**
+- **▶ (Trigger DAG)** top-right = "run it right now" (don't wait for the schedule).
+- **Toggle On/Off** = pause/unpause scheduling.
+
+> 🧒 **Like a child:** Airflow is a **teacher with a checklist**. The Grid is a **report card** — green checks and red X's for each chore, each day. A red X? Click it and read the note (Logs) to see what went wrong.
+
+---
+
+### 🪣 15.3 MinIO — the data lake (port 9001)
+
+**Open it:** http://localhost:9001 → log in **minioadmin / minioadmin**.
+
+**Screen 1 — Buckets (or "Object Browser").** You'll see a bucket named **`raw`**:
+```
+Buckets
+  📦 raw
+```
+- A **bucket** = a top-level folder (like an S3 bucket). Yours is called `raw` because it holds raw data.
+
+**Screen 2 — click `raw` → you'll see folders per table:**
+```
+raw/
+  📁 customers/
+  📁 accounts/
+  📁 transactions/
+```
+**Screen 3 — click `customers/` → click the date folder → you'll see Parquet files:**
+```
+customers/date=2026-06-14/
+  📄 customers_153012345.parquet   12.4 KB
+  📄 customers_153114890.parquet   12.1 KB
+```
+**What it means:**
+- Each **`.parquet` file = one batch of 50 rows** the consumer wrote (remember `batch_size = 50`).
+- The path is **partitioned by date** (`date=2026-06-14`) — a standard trick so queries can skip days they don't need.
+- Click a file → **Preview/Download** to see the actual data inside.
+
+> 🧒 **Like a child:** MinIO is a **storage room with labeled boxes**. The `raw` box has 3 shelves (customers, accounts, transactions). Each shelf has dated envelopes, and each envelope holds 50 receipts (a Parquet file). If you see files appearing here, your conveyor belt is working.
+
+---
+
+### 📨 15.4 Kafka — the streaming bus (port 29092)
+
+**Important:** in this project Kafka has **no built-in web UI** (we didn't add one). You explore it with
+**commands** that run *inside* the Kafka container. Here's what each shows you:
+
+**See the topics (the "channels"):**
+```bash
+docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list
+```
+**You'll see:**
+```
+banking_server.public.customers
+banking_server.public.accounts
+banking_server.public.transactions
+```
+→ Debezium created **one topic per table**. A **topic** = a named stream of messages (like a WhatsApp group; producers post, consumers read).
+
+**Peek at the actual messages:**
+```bash
+docker exec kafka kafka-console-consumer --bootstrap-server localhost:9092 \
+  --topic banking_server.public.customers --from-beginning --max-messages 1
+```
+**You'll see** a big JSON with a `schema` and a `payload` containing `before`/`after` — the **change event** (what the row looked like before and after the change). `after` is the new row; that's what the consumer keeps.
+
+**Check the consumer's progress (lag):**
+```bash
+docker exec kafka kafka-consumer-groups --bootstrap-server localhost:9092 \
+  --describe --group minio-landing-group
+```
+**You'll see** columns `CURRENT-OFFSET`, `LOG-END-OFFSET`, `LAG`:
+- **LOG-END-OFFSET** = total messages in the topic.
+- **CURRENT-OFFSET** = how many the consumer has read.
+- **LAG** = how many are still waiting (LAG 0 = caught up). *(When our consumer was "stuck", LAG stayed huge and CURRENT-OFFSET stayed 0 — that's how we knew it wasn't actually reading.)*
+
+> 🧒 **Like a child:** Kafka is a **row of mailboxes** (topics). Debezium drops a letter in whenever the database changes. The consumer is a postman reading letters in order; the **offset** is a bookmark of "last letter I read," and **lag** is "how many letters are still unread."
+>
+> 💡 *Want a Kafka UI?* Add a `provectuslabs/kafka-ui` or `redpanda-console` container to `docker-compose.yml` on a port like 8085, and you'd get a clickable view of topics/messages — a nice future upgrade.
+
+---
+
+### 🔌 15.5 Debezium Connect — the CDC engine (port 8083)
+
+**Open it:** in a browser or with curl. It's a **REST API**, not a pretty UI.
+
+**See registered connectors:**
+```bash
+curl -s http://localhost:8083/connectors
+# → ["postgres-connector"]
+```
+**Check a connector's health:**
+```bash
+curl -s http://localhost:8083/connectors/postgres-connector/status
+```
+**You'll see:**
+```json
+{ "connector": { "state": "RUNNING" },
+  "tasks": [ { "id": 0, "state": "RUNNING" } ] }
+```
+**What it means:** both `state` values say **`RUNNING`** → Debezium is actively watching Postgres and streaming changes to Kafka. If you see `FAILED`, the `trace` field tells you why.
+
+> 🧒 **Like a child:** Debezium is a **security camera** pointed at the database. `RUNNING` = the camera is on and recording every change. The `/status` URL is the little "REC ●" light that tells you it's working.
+
+---
+
+### ❄️ 15.6 Snowflake — the cloud warehouse (web app)
+
+**Open it:** https://app.snowflake.com → sign in.
+
+**What you'll see / do:**
+- **Left menu → "Databases"** → expand **`BANKING`** → you'll see schemas **`RAW`** (bronze) and **`ANALYTICS`** (your dbt models).
+- Expand `ANALYTICS` → **Tables/Views** → you'll find `STG_CUSTOMERS`, `DIM_CUSTOMERS`, `FACT_TRANSACTIONS`, `CUSTOMERS_SNAPSHOT`, etc. Click one → **Data Preview** tab shows real rows.
+- **"Worksheets"** (top) = where you type SQL and hit **Run** (▶). Try:
+  ```sql
+  SELECT customer_id, is_current, effective_from, effective_to
+  FROM BANKING.ANALYTICS.DIM_CUSTOMERS
+  WHERE customer_id = '3';   -- after an email change you'll see 2 rows (SCD2!)
+  ```
+- **Top-right role picker** = switch between `ACCOUNTADMIN` (for grants) and `SVC_AIRFLOW_ROLE`.
+- **"Query History"** (Activity menu) = every query that ran, with time + cost — great for debugging.
+
+> 🧒 **Like a child:** Snowflake is a **giant smart library**. `RAW` is the messy returns bin; `ANALYTICS` is the organized shelves. A **Worksheet** is the librarian's desk where you ask questions (SQL). The **warehouse** (`COMPUTE_WH`) is the librarian's energy — it powers up to answer, then rests.
+
+---
+
+### 🐘 15.7 DBeaver — looking inside the source Postgres (port 5432)
+
+**Open it:** DBeaver app → connect to **localhost : 5432**, database **banking**, user **postgres / postgres**.
+
+**What you'll see:** left panel → expand **banking → Schemas → public → Tables** → `customers`, `accounts`, `transactions`. Double-click a table → **Data** tab = the raw rows the generator inserted.
+
+**Run a query:** SQL Editor → 
+```sql
+SELECT COUNT(*) FROM customers;     -- how many customers generated so far
+SELECT * FROM transactions LIMIT 20;
+```
+> 🧒 **Like a child:** DBeaver is a **window into the source database** — the very first place the data lands, before any pipeline touches it.
+
+---
+
+<a name="trace"></a>
+## 16. 🧭 Follow ONE customer through the whole pipeline
+
+The best way to "get it" — trace a single row end to end:
+
+| Step | Where | What you'd see |
+|---|---|---|
+| 1️⃣ Born | **DBeaver** (Postgres `customers`) | `id=3, email=alice@x.com` appears |
+| 2️⃣ Captured | **Kafka** (`kafka-console-consumer`) | a JSON event with `payload.after = {id:3, email:alice@x.com}` |
+| 3️⃣ Landed | **MinIO** (`raw/customers/date=…/*.parquet`) | a Parquet file containing row 3 |
+| 4️⃣ Loaded | **Snowflake** `BANKING.RAW.CUSTOMERS` | one `variant` column `v` holding the JSON |
+| 5️⃣ Cleaned | **Snowflake** `ANALYTICS.STG_CUSTOMERS` | tidy columns: `customer_id=3, email=alice@x.com` |
+| 6️⃣ Historized | **Snowflake** `ANALYTICS.CUSTOMERS_SNAPSHOT` | row 3 with `dbt_valid_from`, `dbt_valid_to=NULL` |
+| 7️⃣ Modeled | **Snowflake** `ANALYTICS.DIM_CUSTOMERS` | row 3 with `is_current=TRUE` |
+| 8️⃣ Changed email? | re-run generator + `dbt build` | **TWO** rows for id 3: old (`is_current=FALSE`) + new (`TRUE`) |
+| 9️⃣ Shown | **Power BI** | a "Total Customers" card counting the current rows |
+
+If you can narrate those 9 steps in an interview, **you understand the whole system.** 🎯
 
 ---
 

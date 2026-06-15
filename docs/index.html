@@ -310,6 +310,82 @@ SELECT customer_id, SUM(amount) FROM BANKING.ANALYTICS.FACT_TRANSACTIONS GROUP B
   <li>Flow: <code>dev</code> → push → CI → PR → merge <code>main</code> → CD.</li></ul>
   <div class="callout c-prob"><span class="tag t-prob">Your repo</span>folder must be <code>.github/workflows</code> (plural) or Actions never run.</div>`},
 
+{id:"ports", grp:"Explore", icon:"🔌", title:"Ports & URLs", html:`
+  <h2>🔌 Ports & URLs — what's running where</h2>
+  <p>Each tool runs in its own container and opens a <b>port</b> (like an apartment number). Your Mac is the building, <code>localhost</code> is the address, the port is the flat.</p>
+  <table><tr><th>Port</th><th>Tool</th><th>What</th><th>Open with</th></tr>
+   <tr><td><b>8080</b></td><td>Airflow UI</td><td>pipeline manager dashboard</td><td>http://localhost:8080</td></tr>
+   <tr><td><b>9001</b></td><td>MinIO console</td><td>browse your Parquet files</td><td>http://localhost:9001</td></tr>
+   <tr><td>9000</td><td>MinIO API (S3)</td><td>machine door (code uploads)</td><td>boto3 only</td></tr>
+   <tr><td><b>8083</b></td><td>Debezium Connect</td><td>CDC engine REST API</td><td>http://localhost:8083/connectors</td></tr>
+   <tr><td><b>5432</b></td><td>Postgres (banking)</td><td>source database</td><td>DBeaver → localhost:5432</td></tr>
+   <tr><td>5433</td><td>Postgres (airflow)</td><td>Airflow's own DB</td><td>internal</td></tr>
+   <tr><td><b>29092</b></td><td>Kafka (host)</td><td>stream bus from your Mac</td><td>host.docker.internal:29092</td></tr>
+   <tr><td>9092</td><td>Kafka (internal)</td><td>stream bus between containers</td><td>kafka:9092</td></tr>
+   <tr><td>2181</td><td>Zookeeper</td><td>Kafka's helper</td><td>internal</td></tr></table>
+  <div class="callout c-note"><span class="tag t-note">Why 2 doors?</span>Kafka <b>9092</b> = container-to-container (use name <code>kafka</code>); <b>29092</b> = your Mac (use <code>host.docker.internal</code>). Same Kafka, two doors for two kinds of visitors.</div>`},
+
+{id:"explore", grp:"Explore", icon:"🖥️", title:"Explore Every Tool", html:`
+  <h2>🖥️ Open it & look around (like you're five)</h2>
+
+  <h3>🐳 Docker Desktop — the control room</h3>
+  <p>Open the app → <b>Containers</b>. You'll see rows under <code>bank_de_project</code>.</p>
+  <ul><li><b>Green dot ●</b> = running (healthy) — you want these.</li>
+  <li><b>Grey "Exited" ○</b> = finished its one job and stopped. <code>airflow-init</code> is <i>supposed</i> to be exited (it created the tables once).</li>
+  <li>Click the blue <code>PORT:PORT</code> link → opens that UI. Click a row → <b>Logs</b> (the diary) / <b>Exec</b> (a shell inside).</li></ul>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>Docker = a spaceship dashboard. Each container is a crew member. Green = awake & working; grey = the "setup" crew member who finished and went to sleep.</div>
+
+  <h3>🌬️ Airflow (http://localhost:8080 · admin/admin)</h3>
+  <ul><li><b>Home = DAGs list.</b> Each row is a pipeline. The <b>left toggle</b> turns it On/Off. Colored circles = recent runs (🟢 success, 🔴 fail, 🟡 running).</li>
+  <li><b>Click a DAG → Grid view.</b> Columns = runs over time, rows = tasks. A <b>red square</b> = that task failed.</li>
+  <li><b>Click a red square → Logs → scroll to the bottom</b> = the real error. (This is how we found "password is empty" & "MalformedFraming".)</li>
+  <li><b>Graph tab</b> = boxes + arrows showing task order. <b>▶ top-right</b> = run it now.</li></ul>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>Airflow = a teacher with a checklist. The Grid is a report card of green checks and red X's. Red X? Click it, read the note (Logs).</div>
+
+  <h3>🪣 MinIO (http://localhost:9001 · minioadmin/minioadmin)</h3>
+  <p>Buckets → <code>raw</code> → <code>customers/</code> → <code>date=…/</code> → <code>*.parquet</code> files.</p>
+  <ul><li>Each <code>.parquet</code> file = one batch of <b>50 rows</b> the consumer wrote.</li>
+  <li>Path is partitioned by date (<code>date=2026-06-14</code>) so queries skip days they don't need.</li>
+  <li>Files appearing here = your conveyor belt is working. ✅</li></ul>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>MinIO = a storage room with labeled boxes. The <code>raw</code> box has 3 shelves; each holds dated envelopes of 50 receipts.</div>
+
+  <h3>📨 Kafka (no UI — use commands)</h3>
+  <pre><button class="copy">Copy</button><code>docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list
+# → banking_server.public.{customers,accounts,transactions}  (one topic per table)
+
+docker exec kafka kafka-consumer-groups --bootstrap-server localhost:9092 \\
+  --describe --group minio-landing-group
+# LAG column = unread messages. LAG 0 = caught up.</code></pre>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>Kafka = a row of mailboxes (topics). Debezium drops a letter on every DB change. The consumer is a postman; the <b>offset</b> is a bookmark, <b>lag</b> = unread letters.</div>
+
+  <h3>🔌 Debezium Connect (http://localhost:8083)</h3>
+  <pre><button class="copy">Copy</button><code>curl -s http://localhost:8083/connectors/postgres-connector/status
+# "state": "RUNNING"  (both connector + task)  = actively capturing changes ✅</code></pre>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>Debezium = a security camera on the database. <code>RUNNING</code> = the REC ● light is on.</div>
+
+  <h3>❄️ Snowflake (app.snowflake.com)</h3>
+  <ul><li>Left → <b>Databases → BANKING</b> → schemas <code>RAW</code> + <code>ANALYTICS</code>. Click a table → <b>Data Preview</b>.</li>
+  <li><b>Worksheets</b> = type SQL, hit ▶. <b>Top-right role picker</b> = switch ACCOUNTADMIN ↔ SVC_AIRFLOW_ROLE.</li>
+  <li><b>Query History</b> = every query with time + cost.</li></ul>
+  <pre><button class="copy">Copy</button><code>SELECT customer_id, is_current, effective_from, effective_to
+FROM BANKING.ANALYTICS.DIM_CUSTOMERS WHERE customer_id = '3';
+-- after an email change → 2 rows (SCD2!)</code></pre>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>Snowflake = a giant smart library. RAW = the returns bin; ANALYTICS = organized shelves. A Worksheet = the desk where you ask questions.</div>`},
+
+{id:"trace", grp:"Explore", icon:"🧭", title:"Follow One Row", html:`
+  <h2>🧭 Follow ONE customer through the whole pipeline</h2>
+  <p>Trace a single row end-to-end — if you can narrate these 9 steps, you understand the system. 🎯</p>
+  <table><tr><th>Step</th><th>Where</th><th>What you'd see</th></tr>
+   <tr><td>1️⃣ Born</td><td>DBeaver (Postgres)</td><td><code>id=3, email=alice@x.com</code> appears</td></tr>
+   <tr><td>2️⃣ Captured</td><td>Kafka</td><td>JSON event: <code>payload.after = {id:3,…}</code></td></tr>
+   <tr><td>3️⃣ Landed</td><td>MinIO</td><td>a Parquet file containing row 3</td></tr>
+   <tr><td>4️⃣ Loaded</td><td>Snowflake RAW</td><td>one <code>variant</code> column <code>v</code> with the JSON</td></tr>
+   <tr><td>5️⃣ Cleaned</td><td>ANALYTICS.STG_CUSTOMERS</td><td>tidy columns: <code>customer_id=3</code></td></tr>
+   <tr><td>6️⃣ Historized</td><td>CUSTOMERS_SNAPSHOT</td><td>row 3 with <code>dbt_valid_to=NULL</code></td></tr>
+   <tr><td>7️⃣ Modeled</td><td>DIM_CUSTOMERS</td><td>row 3 with <code>is_current=TRUE</code></td></tr>
+   <tr><td>8️⃣ Email change?</td><td>re-run + dbt build</td><td><b>2 rows</b>: old (FALSE) + new (TRUE)</td></tr>
+   <tr><td>9️⃣ Shown</td><td>Power BI</td><td>"Total Customers" card</td></tr></table>`},
+
 {id:"commands", grp:"Reference", icon:"⌨️", title:"Command Journey", html:`
   <h2>Command Journey (every command, by phase)</h2>
   <h3>🐳 Docker</h3>
