@@ -28,6 +28,11 @@
 14. [🔌 Ports & URLs — what's where](#ports)
 15. [🖥️ Exploring Every Tool (click-by-click)](#explore)
 16. [🧭 Follow ONE row through the pipeline](#trace)
+17. [🧪 Hands-On Exercises](#exercises)
+18. [🔧 Troubleshooting Playbook](#playbook)
+19. [🕰️ SCD2 by example](#scd2)
+20. [✅ Add Data Quality (dbt tests)](#quality)
+21. [🏗️ Build It From Scratch](#scratch)
 
 ---
 
@@ -729,6 +734,185 @@ The best way to "get it" — trace a single row end to end:
 | 9️⃣ Shown | **Power BI** | a "Total Customers" card counting the current rows |
 
 If you can narrate those 9 steps in an interview, **you understand the whole system.** 🎯
+
+---
+
+<a name="exercises"></a>
+## 17. 🧪 Hands-On Exercises (with expected output)
+
+Do these in order. Each level builds confidence. ✅ = expected result.
+
+### 🟢 Beginner
+1. **Count the source rows.** In DBeaver: `SELECT COUNT(*) FROM customers;`
+   ✅ a number that grows each time you run the generator.
+2. **Generate one batch.** `python data-geneator/faker_generator.py --once`
+   ✅ `Generated 10 customers, 20 accounts, 50 transactions.`
+3. **See the topics.** `docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list`
+   ✅ three `banking_server.public.*` topics.
+4. **Find a Parquet file** in MinIO (http://localhost:9001 → `raw` → `customers`).
+   ✅ at least one `.parquet` file.
+
+### 🟡 Intermediate
+5. **Prove dedup works.** In Snowflake: compare counts —
+   ```sql
+   SELECT COUNT(*) FROM BANKING.RAW.CUSTOMERS;            -- many (every CDC event)
+   SELECT COUNT(*) FROM BANKING.ANALYTICS.STG_CUSTOMERS;  -- fewer (one per customer_id)
+   ```
+   ✅ staging count ≤ raw count (the `row_number() … rn=1` dedup).
+6. **Build only one model.** `dbt run --select stg_accounts`
+   ✅ `PASS=1`.
+7. **Trace lineage.** `dbt list --select stg_customers+`
+   ✅ shows `stg_customers → customers_snapshot → dim_customers`.
+
+### 🔴 Production-level
+8. **Prove SCD2.** Change customer 3's email in DBeaver, regenerate, then:
+   ```bash
+   python kafka-debezium/generate_and_post_connector.py   # ensure connector running
+   # let the consumer + Airflow load it, then:
+   cd banking_dbt && dbt build
+   ```
+   ```sql
+   SELECT customer_id, email, is_current, effective_from, effective_to
+   FROM BANKING.ANALYTICS.DIM_CUSTOMERS WHERE customer_id = '3';
+   ```
+   ✅ **two rows**: old (`is_current=FALSE`, has `effective_to`) + new (`is_current=TRUE`).
+9. **Measure consumer lag under load.** Run the generator in a loop, then:
+   `docker exec kafka kafka-consumer-groups --bootstrap-server localhost:9092 --describe --group minio-landing-group`
+   ✅ watch `LAG` rise then fall to 0 as the consumer catches up.
+10. **Top customers by spend** (a real BI query):
+    ```sql
+    SELECT c.first_name, c.last_name, SUM(f.amount) AS total
+    FROM BANKING.ANALYTICS.FACT_TRANSACTIONS f
+    JOIN BANKING.ANALYTICS.DIM_CUSTOMERS c
+      ON f.customer_id = c.customer_id AND c.is_current = TRUE
+    GROUP BY 1,2 ORDER BY total DESC LIMIT 10;
+    ```
+    ✅ a top-10 leaderboard.
+
+---
+
+<a name="playbook"></a>
+## 18. 🔧 Troubleshooting Playbook (every error we hit)
+
+Symptom → cause → fix. This is the gold from our real debugging session.
+
+| Symptom | Real cause | Fix |
+|---|---|---|
+| `no matching manifest for linux/arm64/v8` | image has no ARM64 build (Apple Silicon) | use a multi-arch tag (`debezium/connect:2.7.3.Final`) or `platform: linux/amd64` |
+| Airflow webserver/scheduler **crash-loop**, `relation "log" does not exist` | metadata DB not initialized | `airflow db migrate` + `airflow users create` (or an `airflow-init` service) |
+| Airflow **"Invalid login"** | wrong password / using DB password as web login | `airflow users reset-password`; web login ≠ `.env` DB password |
+| `ModuleNotFoundError: No module named 'X'` | ran with system Python, not the venv | `source .venv/bin/activate`, then plain `python` |
+| DBeaver: `role "postgres" does not exist` | a **second** Postgres (Homebrew) owns port 5432 | `brew services stop postgresql@16`; check `lsof -iTCP:5432` |
+| Debezium: `database.hostname … A value is required` | env var missing / wrong `.env` loaded | each folder has its own `.env`; Debezium host = service name `postgres` |
+| Consumer connects but **0 messages**, `Invalid frame length: 1048666` | kafka-python 3.0.0 aborts fetches ≥1MB | `max_partition_fetch_bytes=262144` |
+| Consumer can't connect (`host.docker.internal` unknown) | Mac doesn't resolve it (Windows does) | add `127.0.0.1 host.docker.internal` to `/etc/hosts` |
+| Snowflake: `Unable to load PEM file … MalformedFraming` | key has no `BEGIN/END` lines / passed as string | rebuild a proper `.p8`, convert to **DER bytes** |
+| dbt: `'…CUSTOMERS_SNAPSHOT' does not exist` | ran `dbt run` (skips snapshots) | use **`dbt build`** (or `dbt snapshot` first) |
+| dbt: `Insufficient privileges … CREATE VIEW/TABLE/SCHEMA` | role lacks grants / doesn't own the schema | grant on the schema; ideally let the role **own** `ANALYTICS` |
+| dbt: `project … not found` | ran from the wrong folder | `cd banking_dbt` first (or `--project-dir`) |
+| `git push` → `No configured push destination` | no remote / repo in wrong folder | repo at project root + `gh repo create … --push` |
+| `.gitignore` not hiding a file | file already tracked | `git rm --cached <path>` then commit |
+
+> 🩺 **The universal move:** when something "just hangs" or fails silently, **turn on logging** (`logging.basicConfig(level=logging.WARNING)`) or read the **last lines** of the log — that's how we found the 1 MB Kafka bug and the PEM error.
+
+---
+
+<a name="scd2"></a>
+## 19. 🕰️ SCD2 by example (the project's signature feature)
+
+Say customer **id 3** changes their email. Here's what happens **inside the snapshot table**:
+
+**Before the change** — one row, currently active:
+```
+customer_id | email           | dbt_valid_from | dbt_valid_to
+3           | alice@old.com   | 2026-06-14     | NULL          ← active (NULL end = current)
+```
+
+**After `dbt build`** (email changed to `alice@new.com`) — two rows:
+```
+customer_id | email           | dbt_valid_from | dbt_valid_to
+3           | alice@old.com   | 2026-06-14     | 2026-06-15    ← closed (history kept)
+3           | alice@new.com   | 2026-06-15     | NULL          ← new active version
+```
+
+**In `DIM_CUSTOMERS`** the `is_current` flag makes this easy to query:
+```
+customer_id | email         | is_current
+3           | alice@old.com | FALSE
+3           | alice@new.com | TRUE
+```
+
+**Why it matters (interview):** a report dated *last month* should show `alice@old.com`; today's report shows `alice@new.com`. SCD2 lets you answer **"what was true at any point in time"** — essential for banking, audit, and compliance.
+
+> 🧒 **Like a child:** it's like keeping **every version of a saved document** instead of overwriting it. The newest has no "valid-to" date (still in use); the old ones are stamped "valid until …".
+
+---
+
+<a name="quality"></a>
+## 20. ✅ Add Data Quality (dbt tests) — the missing piece
+
+The project has **no tests yet** — a great upgrade. dbt tests are SQL checks that fail the build if data is bad. Create `banking_dbt/models/staging/schema.yml`:
+
+```yaml
+version: 2
+models:
+  - name: stg_customers
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]        # every customer has exactly one id
+      - name: email
+        tests: [not_null]
+  - name: stg_accounts
+    columns:
+      - name: account_id
+        tests: [unique, not_null]
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:                # every account points to a real customer
+              to: ref('stg_customers')
+              field: customer_id
+  - name: fact_transactions
+    columns:
+      - name: transaction_id
+        tests: [unique, not_null]
+      - name: amount
+        tests:
+          - dbt_utils.accepted_range:      # money must be positive
+              min_value: 0
+```
+Run them:
+```bash
+dbt test                 # run all tests
+dbt build                # build + test in one go
+```
+✅ Output like `PASS=8 WARN=0 ERROR=0`. If `customer_id` had a duplicate, the `unique` test **fails the build** — catching bad data before it reaches dashboards.
+
+**The 4 built-in tests:** `unique`, `not_null`, `accepted_values`, `relationships`. (The `dbt_utils.*` ones need adding `dbt-utils` to `packages.yml` + `dbt deps`.)
+
+**🎤 Interview:** *"How do you ensure data quality?"* → dbt tests on keys (`unique`, `not_null`), referential integrity (`relationships`), and value ranges — wired into CI so bad data **can't merge**.
+
+---
+
+<a name="scratch"></a>
+## 21. 🏗️ Build It From Scratch (mastery checklist)
+
+Can you do this on an empty folder, no copy-paste? That's mastery. Tick each box:
+
+- [ ] `docker-compose.yml` with zookeeper, kafka (2 listeners), connect, postgres (`wal_level=logical`), minio, airflow ×3.
+- [ ] `postgres/schema.sql` — 3 tables with PK/FK/constraints.
+- [ ] `faker_generator.py` — insert customers → accounts → transactions (`RETURNING id`).
+- [ ] Register the Debezium connector (host = service name, `pgoutput`, slot, topic prefix).
+- [ ] `kafka_to_minio.py` — consume, batch 50, write Parquet (cap fetch < 1MB).
+- [ ] Snowflake: `BANKING` db, `RAW` + `ANALYTICS` schemas, `COMPUTE_WH`, a role that **owns** the schemas, key-pair auth.
+- [ ] Airflow DAG: MinIO → `PUT` → `COPY INTO` RAW (key-pair from a mounted key or env).
+- [ ] dbt: `sources.yml`, staging (dedup view), snapshots (SCD2), marts (dim/fact), **+ tests**.
+- [ ] Airflow DAG: daily `dbt snapshot` → `dbt run --select marts`.
+- [ ] `.env` per component + `.gitignore` + `.env.example`.
+- [ ] GitHub repo, CI (`dbt compile`) + CD, `.github/workflows` (plural!).
+- [ ] Power BI → Snowflake via **Direct Query**.
+
+> Run through this list out loud before an interview. If you can explain **why** each box exists (not just *what*), you're ready to talk about this project at a senior level.
 
 ---
 

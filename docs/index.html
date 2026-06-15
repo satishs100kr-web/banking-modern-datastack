@@ -389,6 +389,97 @@ FROM BANKING.ANALYTICS.DIM_CUSTOMERS WHERE customer_id = '3';
    <tr><td>8️⃣ Email change?</td><td>re-run + dbt build</td><td><b>2 rows</b>: old (FALSE) + new (TRUE)</td></tr>
    <tr><td>9️⃣ Shown</td><td>Power BI</td><td>"Total Customers" card</td></tr></table>`},
 
+{id:"exercises", grp:"Practice", icon:"🧪", title:"Hands-On Exercises", html:`
+  <h2>🧪 Hands-On Exercises (✅ = expected output)</h2>
+  <h3>🟢 Beginner</h3>
+  <ul><li><b>Count source rows:</b> <code>SELECT COUNT(*) FROM customers;</code> ✅ a growing number.</li>
+  <li><b>Generate one batch:</b> <code>python data-geneator/faker_generator.py --once</code> ✅ "Generated 10 customers, 20 accounts, 50 transactions."</li>
+  <li><b>List topics:</b> <code>docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list</code> ✅ 3 topics.</li></ul>
+  <h3>🟡 Intermediate</h3>
+  <pre><button class="copy">Copy</button><code>-- prove dedup: staging has fewer rows than raw
+SELECT COUNT(*) FROM BANKING.RAW.CUSTOMERS;            -- many (every CDC event)
+SELECT COUNT(*) FROM BANKING.ANALYTICS.STG_CUSTOMERS;  -- fewer (one per customer_id)</code></pre>
+  <ul><li><code>dbt run --select stg_accounts</code> ✅ PASS=1</li>
+  <li><code>dbt list --select stg_customers+</code> ✅ shows the lineage chain.</li></ul>
+  <h3>🔴 Production-level</h3>
+  <pre><button class="copy">Copy</button><code>-- prove SCD2 after changing customer 3's email + dbt build:
+SELECT customer_id, email, is_current, effective_from, effective_to
+FROM BANKING.ANALYTICS.DIM_CUSTOMERS WHERE customer_id = '3';
+-- ✅ TWO rows: old (is_current=FALSE) + new (is_current=TRUE)
+
+-- top customers by spend:
+SELECT c.first_name, SUM(f.amount) total
+FROM BANKING.ANALYTICS.FACT_TRANSACTIONS f
+JOIN BANKING.ANALYTICS.DIM_CUSTOMERS c ON f.customer_id=c.customer_id AND c.is_current=TRUE
+GROUP BY 1 ORDER BY total DESC LIMIT 10;</code></pre>`},
+
+{id:"playbook", grp:"Practice", icon:"🔧", title:"Troubleshooting Playbook", html:`
+  <h2>🔧 Troubleshooting Playbook — every error we hit</h2>
+  <table><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+   <tr><td>no matching manifest arm64</td><td>no ARM build</td><td>multi-arch tag / <code>platform: linux/amd64</code></td></tr>
+   <tr><td>Airflow crash-loop, "log" missing</td><td>DB not initialized</td><td><code>airflow db migrate</code> + create user</td></tr>
+   <tr><td>"Invalid login"</td><td>DB pw ≠ web login</td><td><code>airflow users reset-password</code></td></tr>
+   <tr><td>ModuleNotFoundError</td><td>system Python used</td><td><code>source .venv/bin/activate</code></td></tr>
+   <tr><td>role "postgres" does not exist</td><td>Homebrew PG on 5432</td><td><code>brew services stop postgresql@16</code></td></tr>
+   <tr><td>database.hostname required</td><td>wrong .env / host</td><td>per-folder .env; host = <code>postgres</code></td></tr>
+   <tr><td>0 messages, frame length 1048666</td><td>kafka-python ≥1MB bug</td><td><code>max_partition_fetch_bytes=262144</code></td></tr>
+   <tr><td>host.docker.internal unknown</td><td>Mac doesn't resolve it</td><td>add to <code>/etc/hosts</code></td></tr>
+   <tr><td>MalformedFraming (PEM)</td><td>key has no BEGIN/END</td><td>rebuild .p8 → DER bytes</td></tr>
+   <tr><td>SNAPSHOT does not exist</td><td>ran <code>dbt run</code></td><td>use <code>dbt build</code></td></tr>
+   <tr><td>Insufficient privileges</td><td>role lacks/owns grants</td><td>let role <b>own</b> the schema</td></tr>
+   <tr><td>.gitignore not hiding file</td><td>already tracked</td><td><code>git rm --cached</code></td></tr></table>
+  <div class="callout c-note"><span class="tag t-note">Universal move</span>Hangs or fails silently? <b>Turn on logging</b> or read the <b>last lines</b> of the log — that's how we found the 1MB Kafka bug + the PEM error.</div>`},
+
+{id:"scd2", grp:"Practice", icon:"🕰️", title:"SCD2 by Example", html:`
+  <h2>🕰️ SCD2 by example</h2>
+  <p>Customer <b>id 3</b> changes their email. Inside the snapshot:</p>
+  <h3>Before</h3>
+  <table><tr><th>customer_id</th><th>email</th><th>dbt_valid_from</th><th>dbt_valid_to</th></tr>
+   <tr><td>3</td><td>alice@old.com</td><td>2026-06-14</td><td>NULL ← active</td></tr></table>
+  <h3>After dbt build</h3>
+  <table><tr><th>customer_id</th><th>email</th><th>dbt_valid_from</th><th>dbt_valid_to</th></tr>
+   <tr><td>3</td><td>alice@old.com</td><td>2026-06-14</td><td>2026-06-15 ← closed</td></tr>
+   <tr><td>3</td><td>alice@new.com</td><td>2026-06-15</td><td>NULL ← new active</td></tr></table>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>Like keeping <b>every version</b> of a saved document instead of overwriting. Newest has no "valid-to" date; old ones are stamped "valid until …". Lets you answer "what was true last month?"</div>`},
+
+{id:"quality", grp:"Practice", icon:"✅", title:"Add dbt Tests", html:`
+  <h2>✅ Add Data Quality (dbt tests) — the missing piece</h2>
+  <p>Create <code>banking_dbt/models/staging/schema.yml</code> — SQL checks that fail the build if data is bad:</p>
+  <pre><button class="copy">Copy</button><code>version: 2
+models:
+  - name: stg_customers
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+  - name: stg_accounts
+    columns:
+      - name: customer_id
+        tests:
+          - relationships:           # every account → a real customer
+              to: ref('stg_customers')
+              field: customer_id</code></pre>
+  <pre><button class="copy">Copy</button><code>dbt test     # run checks  →  PASS=8 WARN=0 ERROR=0
+dbt build    # build + test together</code></pre>
+  <div class="callout c-note"><span class="tag t-note">4 built-in tests</span><code>unique</code> · <code>not_null</code> · <code>accepted_values</code> · <code>relationships</code>. Wire into CI so bad data can't merge.</div>`},
+
+{id:"scratch", grp:"Practice", icon:"🏗️", title:"Build From Scratch", html:`
+  <h2>🏗️ Build It From Scratch (mastery checklist)</h2>
+  <p>Can you do this on an empty folder, no copy-paste? That's mastery.</p>
+  <ul>
+  <li>☐ docker-compose: zookeeper, kafka (2 listeners), connect, postgres (<code>wal_level=logical</code>), minio, airflow ×3</li>
+  <li>☐ postgres/schema.sql — 3 tables, PK/FK/constraints</li>
+  <li>☐ faker_generator.py — customers → accounts → transactions (<code>RETURNING id</code>)</li>
+  <li>☐ Debezium connector — host = service name, pgoutput, slot, topic prefix</li>
+  <li>☐ kafka_to_minio.py — consume, batch 50, Parquet, fetch &lt; 1MB</li>
+  <li>☐ Snowflake — BANKING + RAW/ANALYTICS, COMPUTE_WH, role that <b>owns</b> schemas, key-pair</li>
+  <li>☐ Airflow DAG — MinIO → PUT → COPY INTO RAW</li>
+  <li>☐ dbt — sources, staging (dedup), snapshots (SCD2), marts, <b>+ tests</b></li>
+  <li>☐ Airflow DAG — daily dbt snapshot → run marts</li>
+  <li>☐ .env per component + .gitignore + .env.example</li>
+  <li>☐ GitHub repo, CI + CD, <code>.github/workflows</code> (plural!)</li>
+  <li>☐ Power BI → Snowflake (Direct Query)</li></ul>
+  <div class="callout c-lesson"><span class="tag t-lesson">Mastery</span>If you can explain <b>why</b> each box exists (not just what), you can talk about this project at a senior level.</div>`},
+
 {id:"commands", grp:"Reference", icon:"⌨️", title:"Command Journey", html:`
   <h2>Command Journey (every command, by phase)</h2>
   <h3>🐳 Docker</h3>
