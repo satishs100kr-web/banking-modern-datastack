@@ -480,6 +480,90 @@ dbt build    # build + test together</code></pre>
   <li>☐ Power BI → Snowflake (Direct Query)</li></ul>
   <div class="callout c-lesson"><span class="tag t-lesson">Mastery</span>If you can explain <b>why</b> each box exists (not just what), you can talk about this project at a senior level.</div>`},
 
+{id:"internals", grp:"Deep Dive", icon:"🔬", title:"Deep Concepts (internals)", html:`
+  <h2>🔬 How each tool actually works inside</h2>
+  <h3>📨 Kafka internals</h3>
+  <ul><li><b>Broker</b> = one Kafka server. <b>Topic</b> = a named stream. <b>Partition</b> = an ordered append-only log (order guaranteed within a partition).</li>
+  <li><b>Offset</b> = a message's position. <b>Consumer group</b> = consumers sharing work; offsets saved → resume after restart.</li>
+  <li><b>Replication factor</b> = partition copies (1 local, 3 in prod). <b>Zookeeper</b> = older Kafka's coordinator.</li></ul>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>Kafka = a numbered append-only diary per channel. Never erase; keep reading forward and bookmark your spot.</div>
+  <h3>❄️ Snowflake internals</h3>
+  <ul><li><b>Storage/compute separation</b> — scale warehouses independently of data.</li>
+  <li><b>Micro-partitions</b> = auto columnar chunks with min/max stats → pruning (skip chunks). Why it's fast without manual indexes.</li>
+  <li><b>Auto-suspend/resume</b> = warehouse sleeps when idle (saves credits). <b>Time Travel</b> = query past states. <b>Zero-copy clone</b> = instant copies.</li></ul>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>Storage = shelves, compute = librarians, hired separately. More librarians on a busy day; send them home at night.</div>
+  <h3>🔧 dbt internals</h3>
+  <ul><li><b>Jinja</b> <code>{{ ref('x') }}</code> compiles to real table names AND builds the dependency graph.</li>
+  <li><b>Compiled SQL</b> lands in <code>target/compiled/</code>. <b>ref()</b> = the magic that orders builds + powers lineage.</li>
+  <li><b>Materializations</b>: view (saved query) · table (CTAS) · incremental (MERGE new rows) · snapshot (SCD2).</li>
+  <li><b>Tests</b> = SQL that should return zero rows; any rows = fail.</li></ul>
+  <h3>🔌 Debezium / CDC internals</h3>
+  <ul><li><b>WAL</b> = Postgres writes changes here before the table (crash recovery). Debezium reads it → ~no load.</li>
+  <li><b>Logical decoding (pgoutput)</b> = binary WAL → row events. <b>Replication slot</b> = bookmark (unused slot can fill disk!). <b>LSN</b> = WAL position.</li></ul>
+  <h3>🌬️ Airflow internals</h3>
+  <ul><li><b>Scheduler</b> queues tasks · <b>Executor</b> runs them · <b>Metadata DB</b> stores state (why it must init first) · <b>Webserver</b> = the UI.</li></ul>`},
+
+{id:"fullcode", grp:"Deep Dive", icon:"📜", title:"Full Code, Line-by-Line", html:`
+  <h2>📜 Full annotated code</h2>
+  <h3>faker_generator.py</h3>
+  <pre><button class="copy">Copy</button><code>conn.autocommit = True               # commit each insert instantly → Debezium sees it now
+
+def run_iteration():
+    customers = []
+    for _ in range(NUM_CUSTOMERS):    # 1) customers first (FK order)
+        cur.execute("INSERT INTO customers (...) VALUES (...) RETURNING id",
+                    (fake.first_name(), fake.last_name(), fake.unique.email()))
+        customers.append(cur.fetchone()[0])   # RETURNING id → grab new PK
+    for customer_id in customers:     # 2) 2 accounts per customer
+        for _ in range(ACCOUNTS_PER_CUSTOMER):
+            cur.execute("INSERT INTO accounts (...) RETURNING id", (...))
+    for _ in range(NUM_TRANSACTIONS): # 3) 50 transactions (related_account only for TRANSFER)
+        cur.execute("INSERT INTO transactions (...) VALUES (..., 'COMPLETED')", (...))</code></pre>
+  <p><b>Idea:</b> insert customers → accounts → transactions (FK order); <code>RETURNING id</code> threads keys; <code>autocommit</code> = instant CDC; <code>Decimal</code> keeps money exact.</p>
+  <h3>kafka_to_minio.py</h3>
+  <pre><button class="copy">Copy</button><code>for message in consumer:                       # infinite listen loop
+    record = message.value.get("payload",{}).get("after")  # Debezium envelope → the NEW row
+    if record: buffer[message.topic].append(record)
+    if len(buffer[message.topic]) >= 50:       # every 50 rows…
+        df = pd.DataFrame(buffer[message.topic])
+        df.to_parquet(fpath, engine='fastparquet')         # …columnar file
+        s3.upload_file(fpath, bucket,
+            f'{table}/date={date_str}/{table}_{ts}.parquet')  # partition by date → MinIO
+        buffer[message.topic] = []             # reset buffer</code></pre>
+  <p><b>Idea:</b> decode each message → keep <code>payload.after</code> → batch 50 → one date-partitioned Parquet → upload via the S3 API.</p>`},
+
+{id:"mock", grp:"Deep Dive", icon:"🎤", title:"Mock Interview (25 Q&A)", html:`
+  <h2>🎤 Mock Interview Bank</h2>
+  <p>L1 fresher · L2 junior · L3 senior. Answer out loud, then check.</p>
+  <h3>Foundations</h3>
+  <ul><li><b>(L1) OLTP vs OLAP?</b> fast small writes vs heavy analytical reads.</li>
+  <li><b>(L2) Bronze/Silver/Gold?</b> raw → cleaned → business-ready.</li>
+  <li><b>(L2) Parquet over CSV?</b> columnar, compressed, typed → faster/cheaper.</li></ul>
+  <h3>CDC / Kafka</h3>
+  <ul><li><b>(L2) What is CDC?</b> capture row changes via the DB log; low source load.</li>
+  <li><b>(L2) Offset / consumer group?</b> message position / consumers sharing work with saved progress.</li>
+  <li><b>(L3) Consumer lagging — fix?</b> add partitions+consumers, bigger fetch/batch, faster sink.</li></ul>
+  <h3>Snowflake</h3>
+  <ul><li><b>(L2) Storage/compute separation — why?</b> scale reads without touching storage.</li>
+  <li><b>(L2) Micro-partition?</b> auto columnar chunk with min/max stats → pruning.</li>
+  <li><b>(L3) Control cost?</b> right-size + auto-suspend, avoid SELECT *, cluster big tables.</li></ul>
+  <h3>dbt / modeling</h3>
+  <ul><li><b>(L2) view/table/incremental?</b> light · stored · append-only.</li>
+  <li><b>(L2) SCD2 in dbt?</b> snapshots, strategy='check', dbt_valid_from/to.</li>
+  <li><b>(L2) run vs build?</b> models only vs +snapshots+tests.</li>
+  <li><b>(L3) Data quality?</b> dbt tests wired into CI.</li></ul>
+  <h3>Scenario</h3>
+  <ul><li><b>(L3) Works locally, not in Docker?</b> localhost ≠ service name.</li>
+  <li><b>(L3) Dashboard numbers doubled?</b> missing dedup (CDC dups) or a fan-out join — check rn=1 + join grain.</li></ul>`},
+
+{id:"faq", grp:"Deep Dive", icon:"❓", title:"FAQ", html:`
+  <h2>❓ FAQ</h2>
+  <ul><li><b>Run all scripts every time?</b> No — Airflow DAGs automate it. Scripts are for testing/first-load.</li>
+  <li><b>Why 5 .env files?</b> each component loads its neighbor's .env. One root .env with explicit path is cleaner.</li>
+  <li><b>dim_ model failed?</b> you ran <code>dbt run</code> — use <code>dbt build</code>.</li>
+  <li><b>MinIO vs S3?</b> same API; swap endpoint + creds for real S3.</li>
+  <li><b>Production-ready?</b> a faithful learning build; prod adds multi-broker Kafka, secrets manager, schema registry, alerting.</li></ul>`},
+
 {id:"commands", grp:"Reference", icon:"⌨️", title:"Command Journey", html:`
   <h2>Command Journey (every command, by phase)</h2>
   <h3>🐳 Docker</h3>

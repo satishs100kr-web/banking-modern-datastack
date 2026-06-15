@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: stg_customers
+    description: "One clean, deduplicated row per customer (latest version)."
+    columns:
+      - name: customer_id
+        description: "Primary key."
+        tests: [unique, not_null]
+      - name: email
+        tests: [not_null]
+
+  - name: stg_accounts
+    description: "One clean, deduplicated row per account (latest version)."
+    columns:
+      - name: account_id
+        tests: [unique, not_null]
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customers')
+              field: customer_id
+
+  - name: stg_transactions
+    description: "Cleaned transactions (immutable fact rows)."
+    columns:
+      - name: transaction_id
+        tests: [not_null]
+      - name: account_id
+        tests: [not_null]

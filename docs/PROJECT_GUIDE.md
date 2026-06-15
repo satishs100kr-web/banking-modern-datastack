@@ -33,6 +33,10 @@
 19. [🕰️ SCD2 by example](#scd2)
 20. [✅ Add Data Quality (dbt tests)](#quality)
 21. [🏗️ Build It From Scratch](#scratch)
+22. [🔬 Deep Concepts — internals](#internals)
+23. [📜 Full Code, Line-by-Line](#fullcode)
+24. [🎤 Mock Interview Bank (25 Q&A)](#mock)
+25. [❓ FAQ](#faq)
 
 ---
 
@@ -851,7 +855,9 @@ customer_id | email         | is_current
 <a name="quality"></a>
 ## 20. ✅ Add Data Quality (dbt tests) — the missing piece
 
-The project has **no tests yet** — a great upgrade. dbt tests are SQL checks that fail the build if data is bad. Create `banking_dbt/models/staging/schema.yml`:
+> ✅ **Now added & passing** — `banking_dbt/models/staging/schema.yml` exists with **9 tests** (`PASS=9 WARN=0 ERROR=0`).
+
+dbt tests are SQL checks that fail the build if data is bad. The file `banking_dbt/models/staging/schema.yml`:
 
 ```yaml
 version: 2
@@ -913,6 +919,218 @@ Can you do this on an empty folder, no copy-paste? That's mastery. Tick each box
 - [ ] Power BI → Snowflake via **Direct Query**.
 
 > Run through this list out loud before an interview. If you can explain **why** each box exists (not just *what*), you're ready to talk about this project at a senior level.
+
+---
+
+<a name="internals"></a>
+## 22. 🔬 Deep Concepts — how each tool *actually* works inside
+
+Beyond "what it does" — here's the **internals** interviewers probe.
+
+### 📨 Kafka internals
+- **Broker** = one Kafka server (you have 1). A real cluster has many for fault-tolerance.
+- **Topic** = a named stream (e.g. `banking_server.public.customers`).
+- **Partition** = a topic is split into partitions; each is an **ordered, append-only log**. Order is guaranteed *within* a partition, not across. (Yours use 1 partition each.)
+- **Offset** = the position number of a message in a partition. Consumers track "I've read up to offset N."
+- **Consumer group** = consumers sharing the work; Kafka stores each group's offsets so it **resumes after a restart** (your `minio-landing-group`).
+- **Replication factor** = copies of each partition across brokers (yours is 1 — fine locally, you'd use 3 in prod).
+- **Zookeeper** = older Kafka's "coordinator" (tracks brokers/leaders). Newer Kafka (KRaft) drops it.
+> 🧒 Kafka = a numbered **append-only diary** per channel. You never erase; you just keep reading forward and bookmark your spot.
+
+### ❄️ Snowflake internals
+- **Storage / compute separation** = data sits in cloud storage; **warehouses** (compute) read it on demand. Scale them independently.
+- **Micro-partitions** = Snowflake auto-splits tables into ~16MB compressed columnar chunks with min/max metadata → it **prunes** (skips) chunks that can't match your filter. That's why it's fast without manual indexes.
+- **Warehouse** (`COMPUTE_WH`) = a cluster of compute. **Auto-suspend** stops it when idle (saves credits); **auto-resume** wakes it on a query.
+- **Time Travel** = query a table *as of* a past time (`AT(OFFSET => -3600)`) — undo mistakes, audit.
+- **Zero-copy cloning** = `CREATE TABLE x CLONE y` instantly, no data copied (metadata pointers).
+- **Variant** = a column storing semi-structured JSON; query with `v:field::type`.
+> 🧒 Snowflake = a library where the **shelves (storage)** and **librarians (compute)** are hired separately; hire more librarians for a busy day, send them home at night.
+
+### 🔧 dbt internals
+- **Jinja** = the `{{ }}` templating language. `{{ ref('x') }}` and `{{ source('a','b') }}` compile to real table names *and* build the **dependency graph (DAG)**.
+- **Compiled SQL** = dbt turns your model into plain SQL in `target/compiled/…` then runs it. (`dbt compile` to see it.)
+- **`ref()` is the magic** — it makes dbt figure out build order automatically (staging before marts) and powers lineage/docs.
+- **Materializations** = the strategy to persist a model: `view` (a saved query), `table` (`CREATE TABLE AS`), `incremental` (`MERGE`/`INSERT` only new rows), `snapshot` (SCD2 history).
+- **Tests** = SQL that should return **zero rows**; if it returns any, the test fails (e.g. `unique` returns duplicate keys).
+> 🧒 dbt = a smart **recipe book**: each recipe says "I need the output of *that* recipe first" (`ref`), so dbt cooks them in the right order.
+
+### 🔌 Debezium / CDC internals
+- **WAL (Write-Ahead Log)** = Postgres writes every change here *before* the table, for crash recovery. Debezium **reads this log** — that's why CDC adds ~no load.
+- **Logical decoding (`pgoutput`)** = turns the binary WAL into readable row-change events.
+- **Replication slot** = Postgres remembers which WAL position Debezium has consumed, so nothing is lost on restart (but an *unused* slot can fill the disk — a real prod gotcha).
+- **LSN (Log Sequence Number)** = the WAL's position pointer (Debezium's bookmark).
+> 🧒 CDC = reading the database's **CCTV tape** instead of interrupting the staff to ask "what changed?"
+
+### 🌬️ Airflow internals
+- **Scheduler** = decides what should run now and queues tasks.
+- **Executor** = actually runs them (LocalExecutor here; Celery/Kubernetes in prod).
+- **Metadata DB** (the `airflow-postgres`) = stores DAG runs, task states, logs index — *why it must be initialized first*.
+- **Webserver** = the UI reading that metadata DB.
+> 🧒 Airflow = a **head chef** (scheduler) handing tickets to line cooks (executor), with an order board (metadata DB) and a dining-room screen (webserver).
+
+---
+
+<a name="fullcode"></a>
+## 23. 📜 Full Code, Line-by-Line
+
+### `faker_generator.py` (the generator) — annotated
+```python
+import time, psycopg2, random, argparse, sys, os
+from decimal import Decimal, ROUND_DOWN     # exact money math (never float!)
+from faker import Faker                      # the fake-data library
+from dotenv import load_dotenv
+
+load_dotenv()                                # read THIS folder's .env (db credentials)
+
+NUM_CUSTOMERS = 10                           # per loop
+ACCOUNTS_PER_CUSTOMER = 2                    # → 20 accounts per loop
+NUM_TRANSACTIONS = 50                        # per loop
+MAX_TXN_AMOUNT = 1000.00
+CURRENCY = "USD"
+SLEEP_SECONDS = 2                            # loop every 2s
+
+fake = Faker()                               # create the generator
+
+def random_money(min_val, max_val):          # a Decimal amount, 2 places, rounded down
+    val = Decimal(str(random.uniform(float(min_val), float(max_val))))
+    return val.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+
+conn = psycopg2.connect(host=..., port=..., dbname=..., user=..., password=...)  # from .env
+conn.autocommit = True                       # commit each insert instantly → Debezium sees it now
+cur = conn.cursor()
+
+def run_iteration():
+    customers = []
+    for _ in range(NUM_CUSTOMERS):           # 1) make customers
+        cur.execute(
+            "INSERT INTO customers (first_name,last_name,email) VALUES (%s,%s,%s) RETURNING id",
+            (fake.first_name(), fake.last_name(), fake.unique.email()))  # unique email = matches UNIQUE
+        customers.append(cur.fetchone()[0])  # RETURNING id → grab the new PK
+    accounts = []
+    for customer_id in customers:            # 2) 2 accounts per customer
+        for _ in range(ACCOUNTS_PER_CUSTOMER):
+            cur.execute("INSERT INTO accounts (...) VALUES (...) RETURNING id",
+                        (customer_id, random.choice(["SAVINGS","CHECKING"]), random_money(...), CURRENCY))
+            accounts.append(cur.fetchone()[0])
+    for _ in range(NUM_TRANSACTIONS):        # 3) 50 transactions
+        account_id = random.choice(accounts)
+        txn_type = random.choice(["DEPOSIT","WITHDRAWAL","TRANSFER"])
+        related = random.choice([a for a in accounts if a != account_id]) if txn_type=="TRANSFER" else None
+        cur.execute("INSERT INTO transactions (...) VALUES (..., 'COMPLETED')", (...))
+
+try:                                         # main loop
+    while True:
+        run_iteration()
+        if args.once: break                  # --once = single batch then stop
+        time.sleep(SLEEP_SECONDS)
+except KeyboardInterrupt:                     # Ctrl+C = graceful stop
+    print("Interrupted")
+finally:
+    cur.close(); conn.close()                # always close the connection
+```
+**Key ideas:** inserts **customers → accounts → transactions** (FK order); `RETURNING id` threads keys between tables; `autocommit` makes changes instantly visible to CDC; `Decimal` keeps money exact.
+
+### `kafka_to_minio.py` (the consumer) — annotated
+```python
+import boto3, json, os, pandas as pd
+from kafka import KafkaConsumer
+from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
+
+consumer = KafkaConsumer(
+    'banking_server.public.customers','...accounts','...transactions',
+    bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP"),  # host.docker.internal:29092
+    auto_offset_reset='earliest',          # read history from the start
+    enable_auto_commit=True,               # auto-save our offset
+    group_id=os.getenv("KAFKA_GROUP"),     # resume after restart
+    max_partition_fetch_bytes=262144,      # FIX: keep each fetch < 1MB (kafka-python bug)
+    fetch_max_bytes=262144,
+    value_deserializer=lambda x: json.loads(x.decode('utf-8')))  # bytes → dict
+
+s3 = boto3.client('s3', endpoint_url=os.getenv("MINIO_ENDPOINT"),  # MinIO speaks S3
+    aws_access_key_id=os.getenv("MINIO_ACCESS_KEY"),
+    aws_secret_access_key=os.getenv("MINIO_SECRET_KEY"))
+bucket = os.getenv("MINIO_BUCKET")
+if bucket not in [b['Name'] for b in s3.list_buckets()['Buckets']]:
+    s3.create_bucket(Bucket=bucket)        # auto-create 'raw' if missing
+
+def write_to_minio(table, records):
+    df = pd.DataFrame(records)             # rows → DataFrame
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    fpath = f'{table}_{date_str}.parquet'
+    df.to_parquet(fpath, engine='fastparquet', index=False)   # columnar file
+    key = f'{table}/date={date_str}/{table}_{datetime.now():%H%M%S%f}.parquet'  # partition by date
+    s3.upload_file(fpath, bucket, key)     # push to MinIO
+    os.remove(fpath)                       # clean up local temp
+
+batch_size = 50
+buffer = {t: [] for t in ['banking_server.public.customers','...accounts','...transactions']}
+
+for message in consumer:                   # infinite listen loop
+    record = message.value.get("payload",{}).get("after")  # Debezium envelope → new row
+    if record:
+        buffer[message.topic].append(record)
+    if len(buffer[message.topic]) >= batch_size:   # every 50 rows…
+        write_to_minio(message.topic.split('.')[-1], buffer[message.topic])  # …flush to a Parquet
+        buffer[message.topic] = []         # reset the buffer
+```
+**Key ideas:** subscribe to 3 topics → decode each message → keep only `payload.after` (the new row) → **batch 50** → write one Parquet partitioned by date → upload to MinIO via the S3 API.
+
+---
+
+<a name="mock"></a>
+## 24. 🎤 Mock Interview Bank (25 Q&A)
+
+Cover these out loud. **L1** fresher · **L2** junior · **L3** senior.
+
+**Foundations**
+1. *(L1)* What's the difference between OLTP and OLAP? → fast small writes vs heavy analytical reads; different engines.
+2. *(L1)* What is a data pipeline? → automated movement+transformation of data from source to destination.
+3. *(L2)* Bronze/Silver/Gold? → raw landing → cleaned/conformed → business-ready aggregates.
+4. *(L2)* Why Parquet over CSV? → columnar, compressed, typed, splittable → faster + cheaper analytics.
+
+**CDC / Kafka**
+5. *(L2)* What is CDC and why use it? → capture row changes via the DB log; near-real-time, low source load.
+6. *(L2)* What's a Kafka offset / consumer group? → message position / a set of consumers sharing work whose progress (offsets) is saved.
+7. *(L3)* A consumer is lagging badly — how do you fix it? → add partitions + consumers, increase fetch size/batch, optimize the sink, check for a slow downstream.
+8. *(L3)* What happens to a Debezium replication slot if the consumer dies? → Postgres keeps WAL for it → disk can fill; monitor + set limits.
+
+**Warehouse / Snowflake**
+9. *(L2)* Why does Snowflake separate storage and compute? → scale reads without touching storage; pay only for compute you run.
+10. *(L2)* What's a micro-partition? → auto columnar chunk with min/max stats enabling pruning.
+11. *(L3)* How do you control Snowflake cost? → right-size warehouse, auto-suspend, avoid SELECT *, cluster big tables, use result cache.
+12. *(L3)* What is Time Travel and a use case? → query/restore past states; recover from a bad load.
+
+**dbt / modeling**
+13. *(L1)* What does dbt do? → transforms data in the warehouse with version-controlled, tested SQL.
+14. *(L2)* `view` vs `table` vs `incremental`? → light/fresh · stored/fast · append-only for huge tables.
+15. *(L2)* What is SCD2 and how does dbt do it? → keep history; snapshots with `strategy='check'` add `dbt_valid_from/to`.
+16. *(L2)* `dbt run` vs `dbt build`? → models only vs models+snapshots+tests in DAG order.
+17. *(L3)* How do you guarantee data quality? → dbt tests (`unique`,`not_null`,`relationships`,ranges) wired into CI.
+18. *(L3)* Explain star vs snowflake schema. → fact+dims directly vs dims normalized/chained (this project is snowflake-shaped).
+
+**Orchestration / Infra**
+19. *(L2)* What is a DAG? → tasks + dependencies, no cycles.
+20. *(L2)* What's `catchup=False`? → don't back-fill every missed schedule since start_date.
+21. *(L3)* A task fails intermittently — how do you make the pipeline robust? → retries + retry_delay, idempotent tasks, alerts, sensors/timeouts.
+22. *(L2)* Why `.env` + `.gitignore`? → keep secrets out of source control; ship `.env.example` as docs.
+23. *(L3)* What does CI/CD give a data team? → automated tests gate merges; safe, frequent deploys.
+
+**Scenario**
+24. *(L3)* "Works on my machine, not in Docker." → `localhost` ≠ service name; containers use service names; host scripts use `host.docker.internal`.
+25. *(L3)* "Numbers in the dashboard look doubled." → likely missing dedup (CDC duplicates) or a fan-out join; check `row_number() rn=1`, snapshot uniqueness, and join grain.
+
+---
+
+<a name="faq"></a>
+## 25. ❓ FAQ
+
+- **Do I need to run all scripts every time?** No — the **Airflow DAGs** automate the load + snapshots. Run scripts manually only for testing/first-load.
+- **Why are there 5 `.env` files?** Each component loads the `.env` next to it. (A single root `.env` with explicit `load_dotenv(path=…)` is cleaner — a valid refactor.)
+- **Why did my `dim_` model fail?** You probably ran `dbt run`; use `dbt build` so snapshots build first.
+- **MinIO vs AWS S3?** Same S3 API; MinIO is the free local stand-in. Swapping to real S3 = change the endpoint + creds.
+- **Is this production-ready?** It's a faithful *learning* build. For prod: multi-broker Kafka, managed Snowflake roles, secrets manager, schema registry, alerting, and tests in CI.
 
 ---
 
