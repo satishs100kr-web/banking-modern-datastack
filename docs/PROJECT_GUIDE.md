@@ -37,6 +37,7 @@
 23. [📜 Full Code, Line-by-Line](#fullcode)
 24. [🎤 Mock Interview Bank (25 Q&A)](#mock)
 25. [❓ FAQ](#faq)
+26. [🌬️ Airflow Webserver — every screen explained](#airflow-ui)
 
 ---
 
@@ -1131,6 +1132,126 @@ Cover these out loud. **L1** fresher · **L2** junior · **L3** senior.
 - **Why did my `dim_` model fail?** You probably ran `dbt run`; use `dbt build` so snapshots build first.
 - **MinIO vs AWS S3?** Same S3 API; MinIO is the free local stand-in. Swapping to real S3 = change the endpoint + creds.
 - **Is this production-ready?** It's a faithful *learning* build. For prod: multi-broker Kafka, managed Snowflake roles, secrets manager, schema registry, alerting, and tests in CI.
+
+---
+
+<a name="airflow-ui"></a>
+## 26. 🌬️ Airflow Webserver — every screen, explained
+
+Open **http://localhost:8080** and log in **admin / admin**. Here is *every* screen you'll meet, drawn out, with what each part means. (Airflow 2.9 UI.)
+
+### 26.1 🔐 The Login page
+```
+┌─────────────────────────────────────┐
+│            Airflow                    │
+│   Username  [ admin            ]      │
+│   Password  [ •••••            ]      │
+│            [   Sign In   ]            │
+└─────────────────────────────────────┘
+```
+- This login is the **admin user you created** (`airflow users create`). It is **not** the `.env` database password.
+- Forgot it? `docker compose run --rm airflow-scheduler airflow users reset-password --username admin --password admin`.
+
+### 26.2 🏠 The DAGs home page (the main list)
+After login you land here — a table of every pipeline:
+```
+ DAGs
+ ┌────┬──────────────────────────────┬─────────┬───────────┬──────────────┬─────────┬──────────┐
+ │ On │ DAG                          │ Owner   │ Runs      │ Schedule     │ Last Run│ Recent   │
+ ├────┼──────────────────────────────┼─────────┼───────────┼──────────────┼─────────┼──────────┤
+ │ ◉  │ minio_to_snowflake_banking   │ airflow │ ✅12 ❌1  │ */1 * * * *  │ 16:42   │ ●●●●○●●● │
+ │ ◯  │ SCD2_snapshots               │ airflow │ ✅3       │ @daily       │ 00:00   │ ●●●      │
+ └────┴──────────────────────────────┴─────────┴───────────┴──────────────┴─────────┴──────────┘
+```
+What each column means:
+- **On toggle (◉/◯)** — ◉ = **unpaused** (the scheduler runs it on its schedule). ◯ = **paused** (it will *not* run, even on schedule). **You must turn this On** for a DAG to start working.
+- **DAG** — the pipeline's name (`dag_id`). Click it to open it.
+- **Owner** — who owns it (from `default_args`, here `airflow`).
+- **Runs** — counts of past runs: ✅ success / ❌ failed / 🟡 running.
+- **Schedule** — the cron or preset (`*/1 * * * *` = every minute, `@daily` = once a day).
+- **Last Run** — when the most recent run happened.
+- **Recent Tasks (●●●●)** — colored dots = the latest run's task states (green=ok, red=failed, etc.).
+- **Actions (far right, not shown)** — ▶ **Trigger** (run now), ⟳ refresh, 🗑 delete.
+
+> 🧒 **Like a child:** this is the **list of chores**. Each row is a chore with an on/off switch, how often to do it, and how the last few attempts went (green = done, red = went wrong).
+
+### 26.3 🟦 Grid view (the most important screen)
+Click a DAG name → you land on **Grid**. Time goes left→right, tasks top→bottom:
+```
+ minio_to_snowflake_banking      [ Grid | Graph | Calendar | Code | … ]   ▶ Trigger
+ ┌───────────────┬──────────────────────────────────────────────┐
+ │ (runs →)      │  10:38  10:39  10:40  10:41  10:42            │
+ ├───────────────┼──────────────────────────────────────────────┤
+ │ ■ DAG run     │   🟩     🟩     🟥     🟩     🟩              │  ← whole-run status bar
+ │   download_minio  🟩     🟩     🟥     🟩     🟩              │
+ │   load_snowflake  🟩     🟩     ⬜     🟩     🟩              │  ⬜ = skipped (upstream failed)
+ └───────────────┴──────────────────────────────────────────────┘
+```
+- **Each column = one DAG run** (a scheduled or triggered execution). Newest on the right.
+- **Each row = one task**. The top bar is the **overall run** status.
+- **Square colors:** 🟩 success · 🟥 failed · 🟨 running · ⬜ skipped · ⬛ (dark) queued/scheduled · 🟧 up-for-retry.
+- **Click any square** → a side panel opens with that task-run's details + buttons (Logs, Clear, Mark state…).
+- This is **where you debug**: a red square tells you exactly which task, in which run, failed.
+
+### 26.4 📋 The task-instance panel + Logs (debugging)
+Click a 🟥 square → a panel appears:
+```
+ Task: load_snowflake   Run: 10:40   State: failed
+ [ Logs ] [ Clear ] [ Mark Success ] [ Mark Failed ] [ XCom ] …
+```
+Click **Logs** → the task's full output. **Scroll to the very bottom** — the real error is the last lines:
+```
+ …
+ snowflake.connector.errors.DatabaseError: 250001: Could not connect…
+ ERROR - Task failed with exception
+```
+Buttons:
+- **Logs** — the diary of that task run (where errors live).
+- **Clear** — re-run that task (and downstream) — handy after a fix.
+- **Mark Success/Failed** — manually override state (rarely needed).
+- **XCom** — the small data the task passed to the next (e.g. the list of files `download_minio` handed to `load_snowflake`).
+
+> 🧒 **Like a child:** the Grid is a **report card**; a red box is a wrong answer. Click it, read the teacher's note (**Logs**), fix it, then press **Clear** to "try that question again."
+
+### 26.5 🔗 Graph view (the shape of the pipeline)
+Click the **Graph** tab → boxes + arrows showing task order:
+```
+   ┌──────────────────┐        ┌─────────────────┐
+   │  download_minio  │ ─────▶ │  load_snowflake │
+   └──────────────────┘        └─────────────────┘
+        (green=ok)                 (red=failed)
+```
+- **Arrows = dependencies** — `load_snowflake` only starts after `download_minio` succeeds (`task1 >> task2`).
+- **Box border color** = that task's state in the selected run.
+- For `SCD2_snapshots` you'd see `dbt_snapshot ─▶ dbt_run_marts`.
+
+### 26.6 ▶️ Triggering a run manually
+Top-right of any DAG page:
+- **▶ Trigger DAG** = "run it **right now**", don't wait for the schedule. (Great after you fix something.)
+- **▶ Trigger DAG w/ config** = run now but pass extra parameters (JSON) — advanced.
+
+### 26.7 📅 Other tabs (quick tour)
+- **Calendar** — a heatmap of success/fail per day (spot bad days at a glance).
+- **Code** — the **exact Python** of the DAG (read-only) — confirm what's deployed.
+- **Gantt** — a timeline bar chart of how long each task took (find the slow task).
+- **Audit Log** — who triggered/cleared what.
+
+### 26.8 ⚙️ The Admin menu (top bar)
+- **Admin → Connections** — saved credentials Airflow uses to reach external systems (a cleaner alternative to `.env` for prod). *(This project reads creds from `.env`/env instead.)*
+- **Admin → Variables** — key/value settings you can read in DAGs.
+- **Admin → XComs** — the small messages tasks pass to each other.
+- **Browse → DAG Runs / Task Instances** — searchable history of everything that ran.
+
+### 26.9 🩺 The everyday debugging loop (memorize this)
+```
+ Home → turn DAG On → it runs → red square in Grid?
+   → click it → Logs → read the BOTTOM
+   → fix the code/.env/grant
+   → Clear (re-run) OR ▶ Trigger
+   → square turns green ✅
+```
+
+> 🧒 **Whole UI like a child:** Airflow's webserver is a **school dashboard**. Home = the chore list. Grid = the report card. A red box = a mistake — click it, read the note, fix it, and ask to "try again." Graph = the order the chores must happen in. The ▶ button = "do it now."
 
 ---
 

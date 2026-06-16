@@ -389,6 +389,52 @@ FROM BANKING.ANALYTICS.DIM_CUSTOMERS WHERE customer_id = '3';
    <tr><td>8️⃣ Email change?</td><td>re-run + dbt build</td><td><b>2 rows</b>: old (FALSE) + new (TRUE)</td></tr>
    <tr><td>9️⃣ Shown</td><td>Power BI</td><td>"Total Customers" card</td></tr></table>`},
 
+{id:"airflow-ui", grp:"Explore", icon:"🌬️", title:"Airflow UI — Every Screen", html:`
+  <h2>🌬️ Airflow Webserver — every screen, explained</h2>
+  <p>Open <b>http://localhost:8080</b> → log in <b>admin / admin</b>. Every screen you'll meet:</p>
+
+  <h3>🏠 1. DAGs home (the list)</h3>
+  <pre><code> ┌────┬──────────────────────────────┬─────────┬──────────┬──────────┐
+ │ On │ DAG                          │ Runs    │ Schedule │ Recent   │
+ ├────┼──────────────────────────────┼─────────┼──────────┼──────────┤
+ │ ◉  │ minio_to_snowflake_banking   │ ✅12 ❌1│ */1 ...  │ ●●●●○●●● │
+ │ ◯  │ SCD2_snapshots               │ ✅3     │ @daily   │ ●●●      │
+ └────┴──────────────────────────────┴─────────┴──────────┴──────────┘</code></pre>
+  <ul><li><b>On toggle ◉/◯</b> — ◉ unpaused (runs on schedule), ◯ paused (won't run). <b>Turn it On.</b></li>
+  <li><b>Runs</b> = ✅ success / ❌ fail counts. <b>Schedule</b> = cron (<code>*/1 * * * *</code> = every minute).</li>
+  <li><b>Recent dots</b> = last run's task states. <b>Far right ▶</b> = trigger now.</li></ul>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>The list of chores — each with an on/off switch, how often, and how recent attempts went.</div>
+
+  <h3>🟦 2. Grid view (the main debug screen)</h3>
+  <pre><code>                10:39  10:40  10:41
+ ■ DAG run        🟩     🟥     🟩
+   download_minio 🟩     🟥     🟩
+   load_snowflake 🟩     ⬜     🟩     ⬜ = skipped (upstream failed)</code></pre>
+  <ul><li><b>Columns = runs</b> over time (newest right). <b>Rows = tasks</b>. Top bar = whole-run status.</li>
+  <li>🟩 success · 🟥 failed · 🟨 running · ⬜ skipped · 🟧 retrying.</li>
+  <li><b>Click a 🟥 square</b> → side panel → <b>Logs</b> → scroll to the <b>bottom</b> = the real error.</li></ul>
+
+  <h3>📋 3. Task panel + Logs</h3>
+  <pre><code> Task: load_snowflake  State: failed
+ [ Logs ] [ Clear ] [ Mark Success ] [ XCom ]</code></pre>
+  <ul><li><b>Logs</b> = the task's diary (errors at the bottom). <b>Clear</b> = re-run it after a fix.</li>
+  <li><b>XCom</b> = the small data passed to the next task (e.g. the file list).</li></ul>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>Grid = a report card; a red box = a wrong answer. Click it, read the note (Logs), fix, press Clear to "try again."</div>
+
+  <h3>🔗 4. Graph view (the shape)</h3>
+  <pre><code> [ download_minio ] ──▶ [ load_snowflake ]
+   arrows = order; box color = state in this run</code></pre>
+
+  <h3>▶️ 5. Trigger & other tabs</h3>
+  <ul><li><b>▶ Trigger DAG</b> (top-right) = run now, don't wait for the schedule.</li>
+  <li><b>Calendar</b> = success/fail heatmap per day. <b>Code</b> = the exact DAG Python. <b>Gantt</b> = task durations.</li>
+  <li><b>Admin → Connections / Variables / XComs</b> = saved creds / settings / task messages.</li></ul>
+
+  <h3>🩺 The everyday debug loop</h3>
+  <pre><code> Home → turn DAG On → red square in Grid?
+   → click it → Logs → read the BOTTOM
+   → fix code/.env/grant → Clear (re-run) → 🟩</code></pre>`},
+
 {id:"exercises", grp:"Practice", icon:"🧪", title:"Hands-On Exercises", html:`
   <h2>🧪 Hands-On Exercises (✅ = expected output)</h2>
   <h3>🟢 Beginner</h3>
