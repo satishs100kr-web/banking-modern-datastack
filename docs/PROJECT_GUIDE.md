@@ -38,6 +38,7 @@
 24. [🎤 Mock Interview Bank (25 Q&A)](#mock)
 25. [❓ FAQ](#faq)
 26. [🌬️ Airflow Webserver — every screen explained](#airflow-ui)
+27. [🖥️ Every Tool's UI — deep screen-by-screen](#all-uis)
 
 ---
 
@@ -1252,6 +1253,175 @@ Top-right of any DAG page:
 ```
 
 > 🧒 **Whole UI like a child:** Airflow's webserver is a **school dashboard**. Home = the chore list. Grid = the report card. A red box = a mistake — click it, read the note, fix it, and ask to "try again." Graph = the order the chores must happen in. The ▶ button = "do it now."
+
+---
+
+<a name="all-uis"></a>
+## 27. 🖥️ Every Tool's UI — deep screen-by-screen
+
+Same depth as the Airflow tour, for **every port/tool**. Format: **port → open → what you see → what it means.**
+
+---
+
+### 27.1 🐳 Docker Desktop — the control room (the app)
+
+**Open:** Docker Desktop app → **Containers** (left menu).
+```
+ Containers                                         CPU   PORT(S)
+ ▾ bank_de_project
+   ● airflow-webserver          Running   0.2%   8080:8080   ▶ ⏹ ⟳ 🗑
+   ● airflow-scheduler          Running   1.6%   —
+   ● kafka                      Running   0.9%   29092:29092
+   ● kafka-ui                   Running   0.3%   8085:8080
+   ● bank_de_project-postgres-1 Running   0.0%   5432:5432
+   ● bank_de_project-minio-1    Running   0.3%   9000, 9001
+   ● bank_de_project-connect-1  Running   0.6%   8083:8083
+   ● bank_de_project-zookeeper-1 Running  0.4%   2181:2181
+   ○ airflow-init               Exited(0) —      —
+```
+- **● green = running**, **○ grey "Exited" = stopped**. `airflow-init` *should* be Exited (one-shot setup).
+- **CPU%** column = how hard each container is working (spot a runaway).
+- **Blue PORT links** — click to open that UI in your browser.
+- **Row buttons:** ▶ start · ⏹ stop · ⟳ restart · 🗑 delete.
+- **Click a row → tabs:** **Logs** (the diary — errors here), **Inspect** (config), **Exec** (a shell *inside* the container), **Files** (browse its filesystem), **Stats** (live CPU/RAM).
+> 🧒 Spaceship dashboard — each container is a crew member; green light = working, grey = finished its task and asleep.
+
+---
+
+### 27.2 🪣 MinIO console — the data lake (port 9001)
+
+**Open:** http://localhost:9001 → **minioadmin / minioadmin**.
+
+**Left menu:** Object Browser · Buckets · Access Keys · Monitoring · Identity.
+
+**Object Browser → you'll see your bucket:**
+```
+ Object Browser
+ ┌──────────────────────────────────────────┐
+ │ 📦 raw            3 objects   …            │
+ └──────────────────────────────────────────┘
+   ↓ click raw
+ raw/
+   📁 customers/      📁 accounts/     📁 transactions/
+   ↓ click customers/  →  date=2026-06-15/
+   📄 customers_153012.parquet   12.4 KB   ⬇ 👁 🗑
+```
+- **Bucket** = top-level container (like an S3 bucket). Yours is `raw`.
+- **Folders per table** → inside, **`date=YYYY-MM-DD/`** partitions → **`.parquet` files** (one per 50-row batch).
+- **Per-file icons:** ⬇ download · 👁 **preview** (see the rows!) · 🗑 delete · share.
+- **Buckets page** (left) → create buckets, set policies, versioning, lifecycle rules.
+- **Monitoring** → storage used, request counts.
+> 🧒 A storage room of labeled boxes (buckets) → shelves (tables) → dated envelopes (partitions) → receipts (Parquet, 50 each). Files appearing = your conveyor belt works.
+
+---
+
+### 27.3 📨 Kafka UI — the streaming bus (port 8085)
+
+**Open:** http://localhost:8085 (no login).
+
+**Left menu:** Dashboard · Brokers · Topics · Consumers · Kafka Connect.
+
+**Topics page:**
+```
+ Topics
+ ┌───────────────────────────────────────┬──────────┬───────────┐
+ │ Name                                  │ Partitions│ Messages  │
+ ├───────────────────────────────────────┼──────────┼───────────┤
+ │ banking_server.public.customers       │    1     │   910     │
+ │ banking_server.public.accounts        │    1     │  1820     │
+ │ banking_server.public.transactions    │    1     │  4550     │
+ └───────────────────────────────────────┴──────────┴───────────┘
+   ↓ click a topic → Messages tab
+ { "payload": { "after": { "id": 3, "email": "alice@x.com" }, "op": "c" } }
+```
+- **Brokers** → the Kafka server(s) health, partition counts.
+- **Topics** → one per table; columns show **partitions** and **message count**.
+- **Click a topic → Messages** → read the actual **Debezium change events** in your browser (key, value, offset, timestamp). No commands needed!
+- **Consumers** → groups like `minio-landing-group` with **LAG** (how far behind).
+- **Kafka Connect** → the Debezium `postgres-connector`, its **state** (RUNNING) and tasks.
+> 🧒 A wall of mailboxes (topics). Open one to read the letters (messages). Consumers tab = which postman read how far (offset/lag).
+
+---
+
+### 27.4 🔌 Debezium Connect — the CDC engine (port 8083)
+
+**Open:** it's a **REST API** (use a browser or `curl`), not a styled UI.
+```bash
+curl -s http://localhost:8083/connectors
+# ["postgres-connector"]
+
+curl -s http://localhost:8083/connectors/postgres-connector/status
+```
+```json
+{ "name": "postgres-connector",
+  "connector": { "state": "RUNNING", "worker_id": "…:8083" },
+  "tasks": [ { "id": 0, "state": "RUNNING" } ],
+  "type": "source" }
+```
+- **`/connectors`** → list of registered connectors.
+- **`/status`** → `connector.state` + each `task.state`. **Both RUNNING = healthy.** `FAILED` → read the `trace` field.
+- Other endpoints: `/config` (its settings), `DELETE` to remove, `/restart` to restart.
+- 💡 The **Kafka UI's "Kafka Connect" tab (8085)** shows all this **clickably** — easier than curl.
+> 🧒 A CCTV system. `/status` is the little "REC ●" light — RUNNING means it's recording every DB change.
+
+---
+
+### 27.5 ❄️ Snowflake — the warehouse (web app)
+
+**Open:** https://app.snowflake.com → sign in. (New "Snowsight" UI.)
+
+**Left menu:** Worksheets · Databases · Data · Admin · Activity.
+```
+ Databases                          Worksheet
+ ▾ BANKING                          ┌─────────────────────────────────┐
+   ▾ RAW                            │ SELECT * FROM                    │
+     ▸ Tables (customers, …)        │ BANKING.ANALYTICS.DIM_CUSTOMERS  │
+   ▾ ANALYTICS                      │ WHERE is_current = TRUE;         │
+     ▸ Tables (DIM_CUSTOMERS, …)    │            [ ▶ Run ]             │
+     ▸ Views (STG_CUSTOMERS, …)     └─────────────────────────────────┘
+                                     Results: 900 rows ↓ (table below)
+```
+- **Databases tree** (left) → `BANKING` → schemas `RAW` / `ANALYTICS` → expand **Tables/Views** → click one → **Columns** + **Data Preview** tabs (real rows, no query).
+- **Worksheets** → type SQL, pick **database + warehouse** (top), hit **▶ Run**; results grid appears below.
+- **Top-right role picker** → switch `ACCOUNTADMIN` (for grants) ↔ `SVC_AIRFLOW_ROLE`.
+- **Activity → Query History** → every query, who ran it, duration, **cost**, errors — superb for debugging.
+- **Admin → Warehouses** → start/suspend/resize `COMPUTE_WH`; **Admin → Users & Roles** → RBAC.
+> 🧒 A smart library: tree = the shelves (RAW = returns bin, ANALYTICS = organized), Worksheet = the desk where you ask questions, the warehouse = the librarian's energy (wakes to answer, sleeps when idle).
+
+---
+
+### 27.6 🐘 DBeaver — the source database window (port 5432)
+
+**Open:** DBeaver app → connect **localhost:5432**, db **banking**, **postgres/postgres**.
+```
+ Database Navigator             SQL Editor
+ ▾ banking                      ┌──────────────────────────────┐
+   ▾ Schemas ▸ public           │ SELECT COUNT(*) FROM customers;│
+     ▾ Tables                   │            [ ▶ Execute ]       │
+       ▸ customers              └──────────────────────────────┘
+       ▸ accounts                Results: 900
+       ▸ transactions
+```
+- **Navigator** (left) → expand **banking → Schemas → public → Tables**.
+- **Double-click a table → Data tab** = browse/edit raw rows; **Properties tab** = columns, keys, constraints.
+- **SQL Editor** (Ctrl/Cmd+]) → run queries; ▶ Execute; results grid below; export to CSV.
+- **ER Diagram tab** on a schema → auto-drawn table relationships (your PK/FK).
+> 🧒 A window into the **very first place** data lands (the source DB), before any pipeline touches it.
+
+---
+
+### 27.7 🔢 Quick reference — which UI for which question
+
+| I want to… | Open | Where exactly |
+|---|---|---|
+| see if a pipeline failed | Airflow :8080 | Grid → red square → Logs |
+| check raw files landed | MinIO :9001 | raw → customers → preview |
+| read a Kafka message | Kafka UI :8085 | Topics → click → Messages |
+| confirm CDC is running | Kafka UI :8085 or :8083 | Connect tab / `/status` |
+| query the warehouse | Snowflake | Worksheets → Run |
+| inspect a slow query/cost | Snowflake | Activity → Query History |
+| see source rows | DBeaver :5432 | table → Data tab |
+| restart a container | Docker Desktop | row → ⟳ |
 
 ---
 

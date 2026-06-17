@@ -435,6 +435,61 @@ FROM BANKING.ANALYTICS.DIM_CUSTOMERS WHERE customer_id = '3';
    → click it → Logs → read the BOTTOM
    → fix code/.env/grant → Clear (re-run) → 🟩</code></pre>`},
 
+{id:"all-uis", grp:"Explore", icon:"🖥️", title:"Every Tool UI (deep)", html:`
+  <h2>🖥️ Every Tool's UI — screen by screen</h2>
+
+  <h3>🐳 Docker Desktop — control room</h3>
+  <pre><code> ▾ bank_de_project                CPU   PORT(S)
+   ● airflow-webserver   Running  0.2%  8080:8080  ▶ ⏹ ⟳ 🗑
+   ● kafka-ui            Running  0.3%  8085:8080
+   ● minio-1            Running  0.3%  9000, 9001
+   ○ airflow-init       Exited(0)</code></pre>
+  <ul><li>● green = running, ○ grey = stopped (airflow-init <i>should</i> be Exited).</li>
+  <li>Click a row → <b>Logs</b> (errors), <b>Exec</b> (shell inside), <b>Files</b>, <b>Stats</b>. Blue ports → open UI.</li></ul>
+
+  <h3>🪣 MinIO console — :9001 (minioadmin/minioadmin)</h3>
+  <pre><code> 📦 raw
+   📁 customers/  📁 accounts/  📁 transactions/
+     date=2026-06-15/
+       📄 customers_153012.parquet  12.4 KB   ⬇ 👁 🗑</code></pre>
+  <ul><li>Bucket → folders per table → <code>date=…/</code> partitions → <code>.parquet</code> (50 rows each).</li>
+  <li>Per file: ⬇ download · 👁 <b>preview the rows</b> · 🗑 delete.</li></ul>
+
+  <h3>📨 Kafka UI — :8085</h3>
+  <pre><code> Topics                              Partitions  Messages
+   banking_server.public.customers       1         910
+   banking_server.public.transactions    1        4550
+   ↓ click → Messages
+ { "payload": { "after": { "id":3, "email":"alice@x.com" }, "op":"c" } }</code></pre>
+  <ul><li><b>Topics</b> → click → <b>Messages</b> = read change events in-browser. <b>Consumers</b> → lag. <b>Kafka Connect</b> → Debezium status.</li></ul>
+
+  <h3>🔌 Debezium Connect — :8083 (REST)</h3>
+  <pre><code>curl -s http://localhost:8083/connectors/postgres-connector/status
+{ "connector": { "state": "RUNNING" }, "tasks": [ { "state": "RUNNING" } ] }</code></pre>
+  <ul><li>Both <b>RUNNING</b> = healthy. <code>FAILED</code> → read the <code>trace</code> field. The Kafka UI "Connect" tab shows this clickably.</li></ul>
+
+  <h3>❄️ Snowflake — app.snowflake.com</h3>
+  <pre><code> ▾ BANKING
+   ▾ RAW        ▸ Tables (customers…)
+   ▾ ANALYTICS  ▸ Tables (DIM_CUSTOMERS…)  ▸ Views (STG_…)
+ Worksheet → SELECT * FROM ANALYTICS.DIM_CUSTOMERS;  [▶ Run]</code></pre>
+  <ul><li>Tree → click a table → <b>Data Preview</b>. <b>Worksheets</b> → run SQL. <b>Top-right role picker</b>. <b>Activity → Query History</b> = every query + cost.</li></ul>
+
+  <h3>🐘 DBeaver — :5432 (postgres/postgres)</h3>
+  <pre><code> ▾ banking ▸ Schemas ▸ public ▸ Tables
+     ▸ customers  ▸ accounts  ▸ transactions
+ SQL Editor → SELECT COUNT(*) FROM customers;  [▶ Execute]  → 900</code></pre>
+  <ul><li>Double-click a table → <b>Data</b> tab (raw rows). <b>ER Diagram</b> tab → auto PK/FK map.</li></ul>
+
+  <h3>🔢 Which UI for which question?</h3>
+  <table><tr><th>I want to…</th><th>Open</th><th>Where</th></tr>
+   <tr><td>see if a pipeline failed</td><td>Airflow :8080</td><td>Grid → red → Logs</td></tr>
+   <tr><td>check raw files landed</td><td>MinIO :9001</td><td>raw → preview</td></tr>
+   <tr><td>read a Kafka message</td><td>Kafka UI :8085</td><td>Topics → Messages</td></tr>
+   <tr><td>confirm CDC running</td><td>:8085 or :8083</td><td>Connect / status</td></tr>
+   <tr><td>query the warehouse</td><td>Snowflake</td><td>Worksheets → Run</td></tr>
+   <tr><td>see source rows</td><td>DBeaver :5432</td><td>table → Data</td></tr></table>`},
+
 {id:"exercises", grp:"Practice", icon:"🧪", title:"Hands-On Exercises", html:`
   <h2>🧪 Hands-On Exercises (✅ = expected output)</h2>
   <h3>🟢 Beginner</h3>
