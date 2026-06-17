@@ -4,7 +4,8 @@
 &nbsp;[![dbt tests](https://img.shields.io/badge/dbt_tests-9_passing-success)](docs/PROJECT_GUIDE.md#quality)
 &nbsp;![Stack](https://img.shields.io/badge/stack-Kafka·Snowflake·dbt·Airflow-orange)
 
-> 📖 **Explore the full interactive guide:** **https://satishs100kr-web.github.io/banking-modern-datastack/**
+> 📖 **Full interactive guide:** **https://satishs100kr-web.github.io/banking-modern-datastack/**
+> 🖥️ **Interactive UI tour** (click-to-learn each tool's screens): **https://satishs100kr-web.github.io/banking-modern-datastack/ui-tour.html**
 
 A **real-time, enterprise-grade data engineering pipeline** for banking — built end to end with
 Change Data Capture, a data lake, a cloud warehouse, SCD2 history, orchestration, and CI/CD.

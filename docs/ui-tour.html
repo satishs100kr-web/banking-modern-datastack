@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🖥️ Interactive UI Tour — Banking Data Stack</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#2d333b;
+    --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --green:#3fb950;
+    --red:#f85149; --yellow:#d29922; --purple:#bc8cff; --teal:#39c5cf;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.55;font-size:14px}
+  a{color:var(--accent);text-decoration:none}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace;background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
+
+  header{padding:24px 30px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,#161b22,#1c2c4a)}
+  header h1{font-size:22px}header p{color:var(--muted);font-size:13px;margin-top:4px}
+  header a.back{font-size:12.5px}
+
+  /* tabs */
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;padding:14px 30px;background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:20}
+  .tab{padding:8px 15px;border-radius:9px;border:1px solid var(--border);background:var(--panel2);color:var(--text);cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap}
+  .tab:hover{border-color:var(--accent)}
+  .tab.active{background:var(--accent);color:#04132b;border-color:var(--accent)}
+
+  main{max-width:1150px;margin:0 auto;padding:26px 30px 60px}
+  .tool{display:none}.tool.active{display:block}
+  .tool h2{font-size:21px;margin-bottom:4px}
+  .tool .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+  .tool .sub b{color:var(--teal)}
+
+  .screen{background:var(--panel);border:1px solid var(--border);border-radius:14px;margin-bottom:26px;overflow:hidden}
+  .screen-title{padding:12px 18px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px}
+  .screen-title .step{background:var(--accent);color:#04132b;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:12px}
+  .screen-body{padding:18px}
+
+  /* mockup window chrome */
+  .win{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#0b0f14;position:relative}
+  .win-bar{display:flex;align-items:center;gap:7px;padding:9px 12px;background:#1a1f29;border-bottom:1px solid var(--border)}
+  .dot{width:11px;height:11px;border-radius:50%}.dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+  .url{flex:1;text-align:center;color:var(--muted);font-size:11.5px;font-family:monospace}
+  .win-inner{padding:14px 16px;position:relative}
+
+  /* annotation pins */
+  .pin{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:11px;background:var(--purple);color:#1a1030;font-size:11px;font-weight:800;cursor:pointer;vertical-align:middle;margin:0 4px;border:2px solid transparent;transition:.15s}
+  .pin:hover,.pin.hl{background:#fff;border-color:var(--purple);box-shadow:0 0 0 3px rgba(188,140,255,.35)}
+
+  /* legend */
+  .legend{margin-top:14px;display:grid;gap:6px}
+  .leg{display:flex;gap:10px;padding:8px 11px;border-radius:9px;background:var(--panel2);border:1px solid transparent;cursor:pointer;font-size:13px;transition:.15s}
+  .leg:hover{border-color:var(--border)}
+  .leg.hl{border-color:var(--purple);background:rgba(188,140,255,.12)}
+  .leg .n{flex:0 0 22px;height:22px;border-radius:50%;background:var(--purple);color:#1a1030;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center}
+  .leg .child{color:var(--yellow);font-size:12px;display:block;margin-top:3px}
+
+  /* generic mock pieces */
+  table.m{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.m th{background:#1a1f29;text-align:left;padding:7px 10px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)}
+  table.m td{padding:8px 10px;border-bottom:1px solid #1a1f29}
+  .sw{width:34px;height:18px;border-radius:10px;background:var(--green);position:relative;display:inline-block}
+  .sw::after{content:"";position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+  .sw.off{background:#3a4250}.sw.off::after{left:2px;right:auto}
+  .sq{display:inline-block;width:20px;height:20px;border-radius:4px;margin:2px}
+  .sq.g{background:var(--green)}.sq.r{background:var(--red)}.sq.y{background:var(--yellow)}.sq.s{background:#30363d}
+  .runsdot{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 1px}
+  .tree{font-family:monospace;font-size:12.5px;line-height:1.9}
+  .tree .ind{color:var(--muted)}
+  .jsonbox{background:#06090d;border-radius:8px;padding:12px;font-family:monospace;font-size:12px;color:#a5d6ff;white-space:pre;overflow-x:auto}
+  .runbtn{background:var(--accent);color:#04132b;border:none;border-radius:6px;padding:5px 12px;font-weight:700;font-size:12px}
+  .file{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px}
+  .file:hover{background:#1a1f29}
+  footer{color:var(--muted);font-size:12px;text-align:center;padding:24px 0 10px;border-top:1px solid var(--border);margin-top:24px}
+  .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;padding:9px 13px;background:rgba(88,166,255,.08);border-left:3px solid var(--accent);border-radius:8px}
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="index.html">← Back to the full guide</a>
+  <h1>🖥️ Interactive UI Tour</h1>
+  <p>Click the purple ① ② ③ pins (or the legend rows) to learn what every part of each tool's screen means.</p>
+</header>
+
+<div class="tabs" id="tabs"></div>
+<main id="main"></main>
+
+<script>
+/* Each tool = { name, icon, url, login, screens:[ {title, mock(html with pins data-n), legend:[{n,text,child}] } ] } */
+const TOOLS = [
+{
+  id:"airflow", icon:"🌬️", name:"Airflow", url:"http://localhost:8080", login:"admin / admin",
+  screens:[
+    { title:"DAGs home — the list of pipelines",
+      mock:`
+      <div class="win"><div class="win-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="url">localhost:8080/home</span></div>
+      <div class="win-inner">
+        <table class="m"><tr><th>On <span class="pin" data-n="1">1</span></th><th>DAG <span class="pin" data-n="2">2</span></th><th>Runs <span class="pin" data-n="3">3</span></th><th>Schedule <span class="pin" data-n="4">4</span></th><th>Recent Tasks <span class="pin" data-n="5">5</span></th><th></th></tr>
+        <tr><td><span class="sw"></span></td><td><b>minio_to_snowflake_banking</b></td><td><span style="color:var(--green)">✅12</span> <span style="color:var(--red)">❌1</span></td><td><code>*/1 * * * *</code></td><td><span class="runsdot" style="background:var(--green)"></span><span class="runsdot" style="background:var(--green)"></span><span class="runsdot" style="background:var(--red)"></span><span class="runsdot" style="background:var(--green)"></span></td><td><span class="pin" data-n="6">6</span></td></tr>
+        <tr><td><span class="sw off"></span></td><td><b>SCD2_snapshots</b></td><td><span style="color:var(--green)">✅3</span></td><td><code>@daily</code></td><td><span class="runsdot" style="background:var(--green)"></span><span class="runsdot" style="background:var(--green)"></span><span class="runsdot" style="background:var(--green)"></span></td><td></td></tr>
+        </table>
+      </div></div>`,
+      legend:[
+        {n:1,text:"<b>On/Off toggle.</b> Green = unpaused (runs on schedule). Grey = paused (won't run). You must turn this ON.",child:"the chore's on/off switch"},
+        {n:2,text:"<b>DAG name</b> (dag_id). Click it to open the pipeline's detail screens.",child:"the chore's name"},
+        {n:3,text:"<b>Run counts</b> — ✅ successes / ❌ failures / 🟡 running.",child:"how the attempts went"},
+        {n:4,text:"<b>Schedule</b> — cron or preset. <code>*/1 * * * *</code> = every minute; <code>@daily</code> = once a day.",child:"how often to do it"},
+        {n:5,text:"<b>Recent tasks</b> — dots show the latest run's task states (green ok, red failed).",child:"the last attempt at a glance"},
+        {n:6,text:"<b>Actions</b> — ▶ trigger now, ⟳ refresh, 🗑 delete.",child:"do-it-now button"},
+      ]},
+    { title:"Grid view — the main debugging screen",
+      mock:`
+      <div class="win"><div class="win-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="url">…/dags/minio_to_snowflake_banking/grid</span></div>
+      <div class="win-inner">
+        <div style="display:grid;grid-template-columns:140px 1fr;gap:6px;font-size:12px">
+          <div style="color:var(--muted)">runs → <span class="pin" data-n="1">1</span></div>
+          <div style="color:var(--muted)">10:39&nbsp;&nbsp;10:40&nbsp;&nbsp;10:41&nbsp;&nbsp;10:42</div>
+          <div>■ DAG run <span class="pin" data-n="2">2</span></div><div><span class="sq g"></span><span class="sq r"></span><span class="sq g"></span><span class="sq g"></span></div>
+          <div>download_minio <span class="pin" data-n="3">3</span></div><div><span class="sq g"></span><span class="sq r"></span><span class="sq g"></span><span class="sq g"></span></div>
+          <div>load_snowflake</div><div><span class="sq g"></span><span class="sq s"></span><span class="sq g"></span><span class="sq g"></span> <span class="pin" data-n="4">4</span></div>
+        </div>
+      </div></div>`,
+      legend:[
+        {n:1,text:"<b>Columns = runs</b> over time (newest on the right). Each column is one execution.",child:"each column = one attempt of the whole chore"},
+        {n:2,text:"<b>Top bar = the whole run's</b> status (rolls up all tasks).",child:"did the whole chore pass?"},
+        {n:3,text:"<b>Rows = tasks.</b> Square colors: 🟩 ok · 🟥 failed · 🟨 running · ⬜ skipped · 🟧 retrying.",child:"each row = one step"},
+        {n:4,text:"<b>⬜ skipped</b> — this task didn't run because the task before it failed. Click a 🟥 square → side panel → <b>Logs</b>.",child:"a step that got skipped because an earlier one broke"},
+      ]},
+    { title:"Task panel + Logs — where you find the error",
+      mock:`
+      <div class="win"><div class="win-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="url">task: load_snowflake (failed)</span></div>
+      <div class="win-inner">
+        <div style="margin-bottom:8px">Task <b>load_snowflake</b> · State <span style="color:var(--red)">failed</span></div>
+        <div style="margin-bottom:10px"><span class="runbtn" style="background:#30363d;color:#fff">Logs <span class="pin" data-n="1">1</span></span> <span class="runbtn" style="background:#30363d;color:#fff">Clear <span class="pin" data-n="2">2</span></span> <span class="runbtn" style="background:#30363d;color:#fff">XCom <span class="pin" data-n="3">3</span></span></div>
+        <div class="jsonbox">[2026-06-15 10:40] INFO - Loading customers…
+[2026-06-15 10:40] ERROR - Task failed with exception
+snowflake.connector.errors.DatabaseError: 250001:
+  Could not connect to Snowflake  <span class="pin" data-n="4">4</span></div>
+      </div></div>`,
+      legend:[
+        {n:1,text:"<b>Logs</b> — the task's full output, the diary where errors live.",child:"the teacher's note about what went wrong"},
+        {n:2,text:"<b>Clear</b> — re-run this task (and downstream) after you fix the cause.",child:"the 'try this question again' button"},
+        {n:3,text:"<b>XCom</b> — the small data this task passed to the next (e.g. the file list).",child:"the note one step hands to the next"},
+        {n:4,text:"<b>Read the BOTTOM of the log</b> — the real error is the last lines. This is exactly how we found the Snowflake & PEM errors.",child:"the actual mistake is at the very bottom"},
+      ]},
+  ]
+},
+{
+  id:"minio", icon:"🪣", name:"MinIO", url:"http://localhost:9001", login:"minioadmin / minioadmin",
+  screens:[
+    { title:"Object Browser — your data lake files",
+      mock:`
+      <div class="win"><div class="win-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="url">localhost:9001 · Object Browser</span></div>
+      <div class="win-inner">
+        <div class="file">📦 <b>raw</b> <span style="color:var(--muted)">— bucket</span> <span class="pin" data-n="1">1</span></div>
+        <div style="margin-left:18px">
+          <div class="file">📁 customers/ <span class="pin" data-n="2">2</span></div>
+          <div style="margin-left:18px">
+            <div class="file">📁 date=2026-06-15/ <span class="pin" data-n="3">3</span></div>
+            <div style="margin-left:18px">
+              <div class="file">📄 customers_153012.parquet <span style="color:var(--muted)">12.4 KB</span> <span style="color:var(--muted)">⬇ 👁 🗑</span> <span class="pin" data-n="4">4</span></div>
+            </div>
+          </div>
+          <div class="file">📁 accounts/</div><div class="file">📁 transactions/</div>
+        </div>
+      </div></div>`,
+      legend:[
+        {n:1,text:"<b>Bucket</b> = a top-level container (like an AWS S3 bucket). Named <code>raw</code> because it holds raw landed data.",child:"a big labeled box"},
+        {n:2,text:"<b>Folder per table</b> — customers / accounts / transactions.",child:"a shelf for each kind of receipt"},
+        {n:3,text:"<b>date=… partition</b> — files grouped by day so queries can skip days they don't need.",child:"dated envelopes"},
+        {n:4,text:"<b>Parquet file</b> = one batch of 50 rows. Icons: ⬇ download · 👁 <b>preview the rows</b> · 🗑 delete.",child:"an envelope of 50 receipts — click 👁 to read them"},
+      ]},
+  ]
+},
+{
+  id:"kafka", icon:"📨", name:"Kafka UI", url:"http://localhost:8085", login:"(no login)",
+  screens:[
+    { title:"Topics — the streams of change events",
+      mock:`
+      <div class="win"><div class="win-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="url">localhost:8085 · Topics</span></div>
+      <div class="win-inner">
+        <table class="m"><tr><th>Topic <span class="pin" data-n="1">1</span></th><th>Partitions <span class="pin" data-n="2">2</span></th><th>Messages <span class="pin" data-n="3">3</span></th></tr>
+        <tr><td>banking_server.public.customers</td><td>1</td><td>910</td></tr>
+        <tr><td>banking_server.public.accounts</td><td>1</td><td>1820</td></tr>
+        <tr><td>banking_server.public.transactions</td><td>1</td><td>4550</td></tr></table>
+        <div style="margin:12px 0 6px;color:var(--muted);font-size:12px">↓ click a topic → Messages tab <span class="pin" data-n="4">4</span></div>
+        <div class="jsonbox">{ "payload": { "after": { "id": 3, "email": "alice@x.com" }, "op": "c" } }</div>
+      </div></div>`,
+      legend:[
+        {n:1,text:"<b>Topic</b> = a named stream, one per source table. Debezium writes change events here.",child:"a mailbox per table"},
+        {n:2,text:"<b>Partitions</b> = how the stream is split for parallelism (1 here; more in prod).",child:"how many lanes the mailbox has"},
+        {n:3,text:"<b>Messages</b> = total change events captured so far.",child:"how many letters arrived"},
+        {n:4,text:"<b>Click a topic → Messages</b> to read the actual events. <code>payload.after</code> = the new row; <code>op:c</code> = create. <b>Consumers</b> tab shows lag.",child:"open the mailbox and read a letter"},
+      ]},
+  ]
+},
+{
+  id:"snowflake", icon:"❄️", name:"Snowflake", url:"app.snowflake.com", login:"your account",
+  screens:[
+    { title:"Snowsight — databases tree + worksheet",
+      mock:`
+      <div class="win"><div class="win-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="url">app.snowflake.com</span></div>
+      <div class="win-inner" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="tree">
+          ▾ BANKING <span class="pin" data-n="1">1</span><br>
+          <span class="ind">&nbsp;&nbsp;▾ RAW</span> <span class="pin" data-n="2">2</span><br>
+          <span class="ind">&nbsp;&nbsp;&nbsp;&nbsp;▸ Tables (customers…)</span><br>
+          <span class="ind">&nbsp;&nbsp;▾ ANALYTICS</span><br>
+          <span class="ind">&nbsp;&nbsp;&nbsp;&nbsp;▸ DIM_CUSTOMERS</span> <span class="pin" data-n="3">3</span><br>
+          <span class="ind">&nbsp;&nbsp;&nbsp;&nbsp;▸ Views (STG_…)</span>
+        </div>
+        <div>
+          <div class="jsonbox" style="color:#e6edf3">SELECT * FROM
+  BANKING.ANALYTICS.DIM_CUSTOMERS
+  WHERE is_current = TRUE;</div>
+          <div style="margin-top:8px"><span class="runbtn">▶ Run <span class="pin" data-n="4">4</span></span> <span style="color:var(--muted);font-size:12px;margin-left:8px">Results: 900 rows</span></div>
+        </div>
+      </div></div>`,
+      legend:[
+        {n:1,text:"<b>Database</b> BANKING — the top container.",child:"the whole library"},
+        {n:2,text:"<b>Schemas</b> — RAW (bronze, the variant landing) and ANALYTICS (your dbt models).",child:"the returns bin vs the organized shelves"},
+        {n:3,text:"<b>Click a table → Data Preview</b> shows real rows without writing a query.",child:"peek inside a book"},
+        {n:4,text:"<b>Worksheet + ▶ Run</b> — type SQL, pick warehouse, run; results below. Top-right = role picker; Activity → Query History = cost & errors.",child:"the desk where you ask questions"},
+      ]},
+  ]
+},
+{
+  id:"debezium", icon:"🔌", name:"Debezium", url:"http://localhost:8083", login:"(REST API)",
+  screens:[
+    { title:"Connect REST — is CDC running?",
+      mock:`
+      <div class="win"><div class="win-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="url">localhost:8083/connectors/postgres-connector/status</span></div>
+      <div class="win-inner">
+        <div class="jsonbox">{
+  "name": "postgres-connector", <span class="pin" data-n="1">1</span>
+  "connector": { "state": "RUNNING" }, <span class="pin" data-n="2">2</span>
+  "tasks": [ { "id": 0, "state": "RUNNING" } ], <span class="pin" data-n="3">3</span>
+  "type": "source"
+}</div>
+      </div></div>`,
+      legend:[
+        {n:1,text:"<b>Connector name</b> — the CDC job watching Postgres.",child:"the security camera's name"},
+        {n:2,text:"<b>connector.state = RUNNING</b> — the connector is healthy and watching.",child:"the camera is powered on"},
+        {n:3,text:"<b>task.state = RUNNING</b> — the worker actually streaming events. If FAILED, a <code>trace</code> field shows why.",child:"the 'REC ●' light is on"},
+      ]},
+  ]
+},
+{
+  id:"dbeaver", icon:"🐘", name:"DBeaver", url:"localhost:5432", login:"postgres / postgres",
+  screens:[
+    { title:"DBeaver — inside the source database",
+      mock:`
+      <div class="win"><div class="win-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="url">PostgreSQL · localhost:5432 · banking</span></div>
+      <div class="win-inner" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="tree">
+          ▾ banking <span class="pin" data-n="1">1</span><br>
+          <span class="ind">&nbsp;▾ Schemas ▸ public ▸ Tables</span><br>
+          <span class="ind">&nbsp;&nbsp;&nbsp;▸ customers</span> <span class="pin" data-n="2">2</span><br>
+          <span class="ind">&nbsp;&nbsp;&nbsp;▸ accounts</span><br>
+          <span class="ind">&nbsp;&nbsp;&nbsp;▸ transactions</span>
+        </div>
+        <div>
+          <div class="jsonbox" style="color:#e6edf3">SELECT COUNT(*) FROM customers;</div>
+          <div style="margin-top:8px"><span class="runbtn">▶ Execute <span class="pin" data-n="3">3</span></span> <span style="color:var(--muted);font-size:12px;margin-left:8px">→ 900</span></div>
+        </div>
+      </div></div>`,
+      legend:[
+        {n:1,text:"<b>banking</b> — the source OLTP database (the very first place data lands).",child:"the front door of the data"},
+        {n:2,text:"<b>Tables</b> — double-click → <b>Data</b> tab shows raw rows; <b>ER Diagram</b> tab auto-draws PK/FK links.",child:"open a drawer to see the raw records"},
+        {n:3,text:"<b>SQL Editor → ▶ Execute</b> — run queries straight against the source.",child:"ask the source DB a question"},
+      ]},
+  ]
+},
+{
+  id:"docker", icon:"🐳", name:"Docker", url:"Docker Desktop app", login:"—",
+  screens:[
+    { title:"Docker Desktop — the container control room",
+      mock:`
+      <div class="win"><div class="win-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="url">Docker Desktop · Containers</span></div>
+      <div class="win-inner">
+        <table class="m"><tr><th>State <span class="pin" data-n="1">1</span></th><th>Name</th><th>CPU <span class="pin" data-n="2">2</span></th><th>Port(s) <span class="pin" data-n="3">3</span></th><th>Actions <span class="pin" data-n="4">4</span></th></tr>
+        <tr><td>🟢</td><td>airflow-webserver</td><td>0.2%</td><td style="color:var(--accent)">8080:8080</td><td>▶ ⏹ ⟳ 🗑</td></tr>
+        <tr><td>🟢</td><td>kafka-ui</td><td>0.3%</td><td style="color:var(--accent)">8085:8080</td><td>▶ ⏹ ⟳ 🗑</td></tr>
+        <tr><td>🟢</td><td>minio-1</td><td>0.3%</td><td style="color:var(--accent)">9000, 9001</td><td>▶ ⏹ ⟳ 🗑</td></tr>
+        <tr><td>⚪</td><td>airflow-init</td><td>—</td><td>—</td><td><span class="pin" data-n="5">5</span></td></tr></table>
+      </div></div>`,
+      legend:[
+        {n:1,text:"<b>State dot</b> — 🟢 running (healthy), ⚪ Exited (stopped).",child:"green light = awake, grey = asleep"},
+        {n:2,text:"<b>CPU%</b> — how hard each container works; spot a runaway.",child:"how busy each crew member is"},
+        {n:3,text:"<b>Ports</b> (blue) — click to open that tool's UI in the browser.",child:"the doors to each tool"},
+        {n:4,text:"<b>Actions</b> — ▶ start · ⏹ stop · ⟳ restart · 🗑 delete. Click a row → Logs / Exec (shell inside) / Files / Stats.",child:"buttons to wake/sleep a crew member"},
+        {n:5,text:"<b>airflow-init Exited is CORRECT</b> — it's a one-shot setup container that created the tables and quit.",child:"the 'setup' crew member finished and went to sleep — that's fine"},
+      ]},
+  ]
+},
+];
+
+/* render */
+const tabsEl=document.getElementById('tabs'), mainEl=document.getElementById('main');
+TOOLS.forEach((t,i)=>{
+  const tab=document.createElement('div'); tab.className='tab'+(i===0?' active':''); tab.textContent=t.icon+' '+t.name; tab.dataset.id=t.id;
+  tab.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));tab.classList.add('active');
+    document.querySelectorAll('.tool').forEach(x=>x.classList.remove('active'));document.getElementById('tool-'+t.id).classList.add('active');window.scrollTo(0,0);};
+  tabsEl.appendChild(tab);
+
+  const tool=document.createElement('div'); tool.className='tool'+(i===0?' active':''); tool.id='tool-'+t.id;
+  let h=`<h2>${t.icon} ${t.name}</h2><div class="sub">Open: <b>${t.url}</b>${t.login!=='—'?' · login: <b>'+t.login+'</b>':''}</div>
+    <div class="hint">👆 Click the purple pins on the mockup — or the legend rows below it — to highlight & explain each part. The yellow line is the "explain-like-I'm-five" version.</div>`;
+  t.screens.forEach((s,si)=>{
+    let legH=s.legend.map(l=>`<div class="leg" data-n="${l.n}"><span class="n">${l.n}</span><span>${l.text}<span class="child">🧒 ${l.child}</span></span></div>`).join('');
+    h+=`<div class="screen" data-screen="${t.id}-${si}">
+      <div class="screen-title"><span class="step">${si+1}</span>${s.title}</div>
+      <div class="screen-body">${s.mock}<div class="legend">${legH}</div></div></div>`;
+  });
+  tool.innerHTML=h+'<footer>Banking Modern Data Stack · interactive UI tour</footer>';
+  mainEl.appendChild(tool);
+});
+
+/* pin ↔ legend highlight (scoped per screen) */
+function wire(){
+  document.querySelectorAll('.screen').forEach(screen=>{
+    function set(n){
+      screen.querySelectorAll('.pin,.leg').forEach(e=>e.classList.remove('hl'));
+      screen.querySelectorAll('.pin[data-n="'+n+'"],.leg[data-n="'+n+'"]').forEach(e=>e.classList.add('hl'));
+    }
+    screen.querySelectorAll('.pin').forEach(p=>p.onclick=()=>{set(p.dataset.n);
+      const leg=screen.querySelector('.leg[data-n="'+p.dataset.n+'"]'); if(leg) leg.scrollIntoView({behavior:'smooth',block:'nearest'});});
+    screen.querySelectorAll('.leg').forEach(l=>l.onclick=()=>set(l.dataset.n));
+  });
+}
+wire();
+</script>
+</body>
+</html>
