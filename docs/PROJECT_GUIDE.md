@@ -1259,6 +1259,8 @@ Top-right of any DAG page:
 <a name="all-uis"></a>
 ## 27. 🖥️ Every Tool's UI — deep screen-by-screen
 
+> 🖱️ **Prefer the interactive version?** Open **[`ui-tour.html`](ui-tour.html)** (live: <https://satishs100kr-web.github.io/banking-modern-datastack/ui-tour.html>) — **27 clickable annotated screens** across all 7 tools. The text below is the same content in printable form.
+
 Same depth as the Airflow tour, for **every port/tool**. Format: **port → open → what you see → what it means.**
 
 ---
