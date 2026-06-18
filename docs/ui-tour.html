@@ -362,7 +362,7 @@ TOOLS.forEach((t,i)=>{
   tabsEl.appendChild(tab);
   const tool=document.createElement('div'); tool.className='tool'+(i===0?' active':''); tool.id='tool-'+t.id;
   let h='<h2>'+t.icon+' '+t.name+'</h2><div class="sub">Open: <b>'+t.url+'</b>'+(t.login!=='—'?' · login: <b>'+t.login+'</b>':'')+' · '+t.screens.length+' screens</div>'+
-    '<div class="hint">👆 Click the purple pins on each mockup — or the legend rows — to highlight & explain. The yellow 🧒 line is the explain-like-I\\'m-five version.</div>';
+    '<div class="hint">👆 Click the purple pins on each mockup — or the legend rows — to highlight & explain. The yellow 🧒 line is the explain-like-I am five version.</div>';
   t.screens.forEach((s,si)=>{
     const legH=s.legend.map(l=>'<div class="leg" data-n="'+l.n+'"><span class="n">'+l.n+'</span><span>'+l.text+'<span class="child">🧒 '+l.child+'</span></span></div>').join('');
     h+='<div class="screen"><div class="screen-title"><span class="step">'+(si+1)+'</span>'+s.title+'</div><div class="screen-body">'+s.mock+'<div class="legend">'+legH+'</div></div></div>';
