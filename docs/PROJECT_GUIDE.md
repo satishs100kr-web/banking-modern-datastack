@@ -39,6 +39,7 @@
 25. [❓ FAQ](#faq)
 26. [🌬️ Airflow Webserver — every screen explained](#airflow-ui)
 27. [🖥️ Every Tool's UI — deep screen-by-screen](#all-uis)
+28. [🔌 Debezium Connector Config — every attribute](#connector-config)
 
 ---
 
@@ -1424,6 +1425,75 @@ curl -s http://localhost:8083/connectors/postgres-connector/status
 | inspect a slow query/cost | Snowflake | Activity → Query History |
 | see source rows | DBeaver :5432 | table → Data tab |
 | restart a container | Docker Desktop | row → ⟳ |
+
+---
+
+<a name="connector-config"></a>
+## 28. 🔌 The Debezium Connector Config — every attribute explained
+
+This is the JSON your `generate_and_post_connector.py` POSTs to Kafka Connect. It tells Debezium
+**what database to watch, how, and how to format the events.** Here is *every* line.
+
+```python
+connector_config = {
+  "name": "postgres-connector",                      # the connector's unique name
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres",                 # which DB host (docker service name)
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "postgres",
+    "database.dbname": "banking",
+    "topic.prefix": "banking_server",                # → topic names start with this
+    "table.include.list": "public.customers,public.accounts,public.transactions",
+    "plugin.name": "pgoutput",
+    "slot.name": "banking_slot",
+    "publication.autocreate.mode": "filtered",
+    "tombstones.on.delete": "false",
+    "decimal.handling.mode": "double",
+  },
+}
+```
+
+### What `connector.class` means (the most confusing line)
+```
+"connector.class": "io.debezium.connector.postgresql.PostgresConnector"
+```
+- It's a **Java class path** — the exact code Kafka Connect should load to do the job.
+- Read it right-to-left: **`PostgresConnector`** (the thing) lives in the package **`io.debezium.connector.postgresql`** (folder path inside the Debezium library).
+- **Why it exists:** Kafka Connect is generic — it can run *many* connectors (MySQL, MongoDB, S3…). This line says **"use the Postgres CDC one."** Change it to `…mysql.MySqlConnector` and the same Connect runtime would do CDC on MySQL instead.
+> 🧒 Like telling a universal remote *which device* it's controlling. "This remote = the **Postgres** TV."
+
+### Every attribute — what it means & how it helps
+
+| Attribute | Value | What it means | How it helps |
+|---|---|---|---|
+| `name` | `postgres-connector` | the connector's unique id in Connect | lets you check `/connectors/postgres-connector/status`, delete, restart |
+| `connector.class` | `…PostgresConnector` | which Debezium plugin to load | picks **Postgres CDC** out of all possible connectors |
+| `database.hostname` | `postgres` | the DB host — the **docker service name**, not `localhost` | Debezium runs inside Docker, so it reaches the DB by service name |
+| `database.port` | `5432` | the DB port | where to connect |
+| `database.user` / `password` | `postgres` | DB login (needs **replication** rights) | lets Debezium read the WAL |
+| `database.dbname` | `banking` | which database | scopes it to your banking DB |
+| `topic.prefix` | `banking_server` | prefix for every Kafka topic it creates | → `banking_server.public.customers` etc. (server-level namespace) |
+| `table.include.list` | `public.customers,…` | the **exact tables** to capture | ignores all other tables — less noise, less load |
+| `plugin.name` | `pgoutput` | the Postgres **logical-decoding plugin** | turns the binary WAL into row events; `pgoutput` is **built into Postgres 10+** (no extra install) |
+| `slot.name` | `banking_slot` | the **replication slot** name | Postgres remembers the WAL position for this slot, so **nothing is lost on restart** |
+| `publication.autocreate.mode` | `filtered` | how Debezium creates the Postgres **publication** | `filtered` = publish **only the included tables** (not the whole DB) |
+| `tombstones.on.delete` | `false` | whether to emit a `null` "tombstone" after a delete | `false` = no extra null messages (simpler for our consumer) |
+| `decimal.handling.mode` | `double` | how `NUMERIC`/`DECIMAL` columns are encoded | `double` = send money as a plain number, **not** base64-encoded bytes — so `amount`/`balance` are readable |
+
+### The three "gotcha" attributes, deeper
+
+**1. `plugin.name: pgoutput`** — Postgres needs a *logical decoding* plugin to translate its internal WAL into readable change events. Older setups used `wal2json` (extra install); **`pgoutput` ships with Postgres 10+**, so it "just works" with your `wal_level=logical` setting. **How it helps:** zero extra software on the DB.
+
+**2. `slot.name: banking_slot`** — a **replication slot** is Postgres's bookmark: "Debezium has consumed the WAL up to here." **How it helps:** if Debezium (or the whole stack) restarts, it resumes **exactly** where it stopped — no duplicates, no missed changes. ⚠️ **Prod gotcha:** if a connector is deleted but its slot isn't, Postgres keeps WAL forever → the disk fills. (Drop unused slots.)
+
+**3. `publication.autocreate.mode: filtered`** — a Postgres **publication** is the official list of tables whose changes are streamed. `filtered` tells Debezium to auto-create a publication containing **only** your 3 tables. Alternatives: `all_tables` (everything — noisy) or `disabled` (you create it by hand). **How it helps:** captures just what you need, automatically.
+
+> 🧒 **Whole config like a child:** it's the **setup form for a security camera**. `connector.class` = which brand of camera. `database.*` = which building to watch. `table.include.list` = which rooms. `slot.name` = the camera's tape bookmark. `decimal.handling.mode` = "record prices as normal numbers, not secret code." `topic.prefix` = the label on every recording it files.
+
+### 🎤 Interview angle
+> *"How did you configure Debezium?"* → "I set `connector.class` to the Postgres connector, pointed it at the DB by its **docker service name**, listed only the 3 tables in `table.include.list`, used the built-in **`pgoutput`** plugin with a named **replication slot** for restart-safety, and set `decimal.handling.mode=double` so money columns come through as readable numbers instead of base64."
 
 ---
 

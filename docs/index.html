@@ -634,6 +634,34 @@ def run_iteration():
         buffer[message.topic] = []             # reset buffer</code></pre>
   <p><b>Idea:</b> decode each message → keep <code>payload.after</code> → batch 50 → one date-partitioned Parquet → upload via the S3 API.</p>`},
 
+{id:"connector-config", grp:"Deep Dive", icon:"🔌", title:"Connector Config (every attr)", html:`
+  <h2>🔌 The Debezium connector config — every attribute</h2>
+  <p>The JSON your script POSTs to Kafka Connect — it says <b>what DB to watch, how, and how to format events.</b></p>
+  <h3>The confusing line: connector.class</h3>
+  <pre><button class="copy">Copy</button><code>"connector.class": "io.debezium.connector.postgresql.PostgresConnector"</code></pre>
+  <ul><li>A <b>Java class path</b>. Read right-to-left: <b>PostgresConnector</b> (the thing) in package <code>io.debezium.connector.postgresql</code>.</li>
+  <li>Kafka Connect is generic (MySQL, Mongo, S3…); this line picks the <b>Postgres CDC</b> one. Swap to <code>…mysql.MySqlConnector</code> → same runtime does MySQL.</li></ul>
+  <div class="callout c-note"><span class="tag t-note">Like a child</span>Telling a universal remote <b>which device</b> it controls: "this = the Postgres TV."</div>
+  <h3>Every attribute</h3>
+  <table><tr><th>Attribute</th><th>Value</th><th>What it means / how it helps</th></tr>
+   <tr><td><code>name</code></td><td>postgres-connector</td><td>unique id → check status / delete / restart</td></tr>
+   <tr><td><code>connector.class</code></td><td>…PostgresConnector</td><td>load the Postgres CDC plugin</td></tr>
+   <tr><td><code>database.hostname</code></td><td>postgres</td><td>DB host = <b>docker service name</b> (Debezium is inside Docker)</td></tr>
+   <tr><td><code>database.user/password</code></td><td>postgres</td><td>DB login with <b>replication</b> rights to read the WAL</td></tr>
+   <tr><td><code>database.dbname</code></td><td>banking</td><td>which database</td></tr>
+   <tr><td><code>topic.prefix</code></td><td>banking_server</td><td>prefix for every topic → <code>banking_server.public.customers</code></td></tr>
+   <tr><td><code>table.include.list</code></td><td>public.customers,…</td><td>capture <b>only</b> these 3 tables (less noise/load)</td></tr>
+   <tr><td><code>plugin.name</code></td><td>pgoutput</td><td>Postgres' built-in logical-decoding plugin (no extra install)</td></tr>
+   <tr><td><code>slot.name</code></td><td>banking_slot</td><td>replication slot = WAL bookmark → <b>restart-safe</b></td></tr>
+   <tr><td><code>publication.autocreate.mode</code></td><td>filtered</td><td>auto-create a publication of <b>only</b> the included tables</td></tr>
+   <tr><td><code>tombstones.on.delete</code></td><td>false</td><td>don't emit a null message after a delete (simpler)</td></tr>
+   <tr><td><code>decimal.handling.mode</code></td><td>double</td><td>send money as a plain number, <b>not</b> base64 bytes → readable</td></tr></table>
+  <h3>The 3 "gotcha" attributes</h3>
+  <ul><li><b>pgoutput</b> — ships with Postgres 10+; works with <code>wal_level=logical</code>. No extra software.</li>
+  <li><b>slot.name</b> — Postgres bookmark → resumes exactly on restart. ⚠️ an unused slot keeps WAL forever → fills disk.</li>
+  <li><b>publication.autocreate.mode=filtered</b> — publishes only your 3 tables, automatically.</li></ul>
+  <div class="callout c-note"><span class="tag t-note">Whole config like a child</span>A security-camera setup form: connector.class = camera brand · database.* = which building · table.include.list = which rooms · slot.name = the tape bookmark · decimal.handling.mode = "record prices as normal numbers, not secret code."</div>`},
+
 {id:"mock", grp:"Deep Dive", icon:"🎤", title:"Mock Interview (25 Q&A)", html:`
   <h2>🎤 Mock Interview Bank</h2>
   <p>L1 fresher · L2 junior · L3 senior. Answer out loud, then check.</p>
