@@ -1,10 +1,16 @@
+# =============================================================================
+#  sources.yml  —  declares WHERE the raw data lives so dbt can find it.
+#  This lets models write {{ source('raw','customers') }} instead of a hard-coded
+#  table name. dbt then (a) resolves it to BANKING.RAW.CUSTOMERS and (b) tracks
+#  lineage (which models depend on which source) for the docs/graph.
+# =============================================================================
 version: 2
 
 sources:
-  - name: raw
-    database: BANKING
-    schema: RAW
-    tables:
+  - name: raw                # the name you use in code: source('raw', ...)
+    database: BANKING        # the Snowflake database
+    schema: RAW              # the schema holding the landed (bronze) tables
+    tables:                  # the actual source tables Airflow loads into
       - name: customers
       - name: accounts
       - name: transactions

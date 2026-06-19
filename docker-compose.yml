@@ -1,59 +1,74 @@
-version: '3.8'
+# =============================================================================
+#  docker-compose.yml  —  defines EVERY container in the stack and how they wire
+#  together. One `docker compose up -d` starts the whole platform.
+#  Services: zookeeper, kafka, kafka-ui, connect(Debezium), postgres(banking),
+#            minio, airflow-init/webserver/scheduler, airflow-postgres.
+#  ${VAR} values come from the .env file. `volumes:` keep data on your Mac.
+# =============================================================================
+version: '3.8'   # compose file format (the "version is obsolete" warning is harmless)
+
 services:
+  # --- Zookeeper: Kafka's coordinator (tracks brokers). Required by this Kafka. ---
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
     environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_CLIENT_PORT: 2181     # the port Kafka talks to Zookeeper on
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
 
+  # --- Kafka: the streaming bus that holds the change events. ---
   kafka:
     image: confluentinc/cp-kafka:7.4.1
     container_name: kafka
     depends_on:
-      - zookeeper
+      - zookeeper                     # Kafka needs Zookeeper up first
     ports:
-      - "9092:9092"   # internal Docker network
-      - "29092:29092" # host machine access
+      - "9092:9092"   # internal Docker network (containers use kafka:9092)
+      - "29092:29092" # host machine access  (your Mac uses host.docker.internal:29092)
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # TWO listeners: 9092 for inside-docker, 29092 for the host. This dual-listener
+      # setup is THE reason there are two ports — see ADVERTISED_LISTENERS below.
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      # What address Kafka tells clients to use: containers -> kafka:9092,
+      # host -> host.docker.internal:29092 (that name must resolve on the Mac).
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://host.docker.internal:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1     # 1 copy (fine locally; 3 in prod)
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
 
-  # Clickable web UI for Kafka — browse topics + messages at http://localhost:8085
+  # --- Kafka UI: clickable web view of topics + messages at http://localhost:8085 ---
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui
     depends_on:
       - kafka
     ports:
-      - "8085:8080"           # host 8085 → UI (avoids clashing with Airflow's 8080)
+      - "8085:8080"           # host 8085 -> the UI (avoids clashing with Airflow's 8080)
     environment:
       KAFKA_CLUSTERS_0_NAME: banking
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092              # reach Kafka inside docker
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
-      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083  # show the connector too
       DYNAMIC_CONFIG_ENABLED: 'true'
 
-
+  # --- Connect (Debezium): the CDC engine. Runs the postgres-connector. ---
   connect:
-    image: debezium/connect:2.7.3.Final
+    image: debezium/connect:2.7.3.Final   # multi-arch tag (works on Apple Silicon)
     depends_on:
       - kafka
       - zookeeper
       - postgres
     ports:
-      - "8083:8083"
+      - "8083:8083"                       # the REST API our script POSTs to
     environment:
-      BOOTSTRAP_SERVERS: 'kafka:9092'
+      BOOTSTRAP_SERVERS: 'kafka:9092'     # where Kafka is (inside docker)
       GROUP_ID: '1'
+      # Debezium stores its own config/offsets/status in these Kafka topics:
       CONFIG_STORAGE_TOPIC: 'connect-configs'
       OFFSET_STORAGE_TOPIC: 'connect-offsets'
       STATUS_STORAGE_TOPIC: 'connect-status'
@@ -62,45 +77,51 @@ services:
       KEY_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
       VALUE_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
 
+  # --- Postgres: the SOURCE banking database (OLTP). ---
   postgres:
     image: postgres:15
-    environment:
+    environment:                          # credentials come from .env
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
-      - ./docker/postgres/data:/var/lib/postgresql/data
+      - ./docker/postgres/data:/var/lib/postgresql/data   # persist the DB on your Mac
+    # CRITICAL for CDC: wal_level=logical turns on the logical write-ahead log that
+    # Debezium reads. Without this, CDC cannot work.
     command: >
       postgres -c wal_level=logical
               -c max_wal_senders=10
               -c max_replication_slots=10
-               
+
+  # --- MinIO: the data lake (S3-compatible object storage). ---
   minio:
     image: minio/minio:latest
-    command: server /data --console-address ":9001"
+    command: server /data --console-address ":9001"   # serve files + a web console
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9000:9000"   # the S3 API (code/boto3 uses this)
+      - "9001:9001"   # the web console (humans use this)
     volumes:
-      - ./docker/minio/data:/data
-    
+      - ./docker/minio/data:/data        # persist the lake files on your Mac
+
+  # --- Airflow init: ONE-SHOT setup. Creates the metadata tables + admin user, then EXITS. ---
   airflow-init:
-    build:
+    build:                               # build a custom image (adds dbt) — see the dockerfile
       context: .
       dockerfile: dockerfile-airflow.dockerfile
     container_name: airflow-init
     depends_on:
       - airflow-postgres
     environment:
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False    # don't load the demo DAGs
+      # Where Airflow stores its own state (its private Postgres):
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres:5432/${AIRFLOW_DB_NAME}
     entrypoint: /bin/bash
-    command:
+    command:                             # run the two setup commands then quit
       - -c
       - |
         airflow db migrate
@@ -109,6 +130,7 @@ services:
           --firstname Satish --lastname Kumar \
           --role Admin --email satishs100kr@gmail.com || true
 
+  # --- Airflow webserver: the UI at http://localhost:8080. ---
   airflow-webserver:
     build:
       context: .
@@ -117,23 +139,24 @@ services:
     restart: always
     depends_on:
       airflow-init:
-        condition: service_completed_successfully
+        condition: service_completed_successfully   # wait until init finished OK
       airflow-postgres:
         condition: service_started
     environment:
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres:5432/${AIRFLOW_DB_NAME}
-    volumes:
-      - ./docker/dags:/opt/airflow/dags
+    volumes:                             # mount project folders INTO the container
+      - ./docker/dags:/opt/airflow/dags          # your DAG files
       - ./docker/logs:/opt/airflow/logs
       - ./docker/plugins:/opt/airflow/plugins
-      - ./banking_dbt:/opt/airflow/banking_dbt
-      - ./banking_dbt/.dbt:/home/airflow/.dbt
-      - ./keys:/opt/airflow/keys:ro
+      - ./banking_dbt:/opt/airflow/banking_dbt   # the dbt project (for the SCD2 DAG)
+      - ./banking_dbt/.dbt:/home/airflow/.dbt    # the dbt profiles.yml
+      - ./keys:/opt/airflow/keys:ro              # the Snowflake key (read-only)
     ports:
       - "8080:8080"
     command: webserver
 
+  # --- Airflow scheduler: decides what runs when and queues the tasks. ---
   airflow-scheduler:
     build:
       context: .
@@ -148,7 +171,7 @@ services:
     environment:
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres:5432/${AIRFLOW_DB_NAME}
-    volumes:
+    volumes:                             # same mounts as the webserver
       - ./docker/dags:/opt/airflow/dags
       - ./docker/logs:/opt/airflow/logs
       - ./docker/plugins:/opt/airflow/plugins
@@ -157,8 +180,7 @@ services:
       - ./keys:/opt/airflow/keys:ro
     command: scheduler
 
-
-
+  # --- Airflow's OWN database (separate from the banking one). ---
   airflow-postgres:
     image: postgres:15
     container_name: airflow-postgres
@@ -168,13 +190,16 @@ services:
       POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD}
       POSTGRES_DB: ${AIRFLOW_DB_NAME}
     volumes:
-      - airflow_postgres_data:/var/lib/postgresql/data
+      - airflow_postgres_data:/var/lib/postgresql/data   # a named volume (managed by docker)
     ports:
-      - "5433:5432"  # separate from banking-postgres to avoid conflict
+      - "5433:5432"  # 5433 on the host so it never clashes with banking-postgres (5432)
 
+# Named volumes = docker-managed storage that survives `docker compose down`.
 volumes:
   airflow_postgres_data:
   postgres_data:
+
+# A custom network so all containers can find each other by service name.
 networks:
   default:
     name: banking-mds-net
