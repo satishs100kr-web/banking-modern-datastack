@@ -1,0 +1,73 @@
+# =============================================================================
+#  cd.yml  —  CONTINUOUS DEPLOYMENT
+#  WHAT IT DOES: after code is merged to `main`, this "deploys" the dbt models —
+#  i.e. it runs them against Snowflake so the warehouse reflects the new code.
+#
+#  REAL deploy needs Snowflake credentials. Those must NEVER be in the repo, so
+#  they are read from GitHub "Secrets" (repo → Settings → Secrets and variables →
+#  Actions). The deploy step below is GUARDED: it only runs if the secrets exist,
+#  so the workflow stays green even before you've added them.
+#
+#  To enable the real deploy, add these repo secrets:
+#    SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_ROLE,
+#    SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DB, SNOWFLAKE_PRIVATE_KEY
+# =============================================================================
+name: CD
+
+# WHEN: only on pushes to main (i.e. after a PR is merged).
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dbt
+        run: pip install --no-cache-dir dbt-core dbt-snowflake
+
+      # Build the models in Snowflake — ONLY if the Snowflake secret is set.
+      # `dbt build` runs models + snapshots + tests. Credentials are injected as
+      # environment variables and read by profiles.yml via env_var() (see note).
+      - name: dbt build (deploy to Snowflake)
+        if: ${{ secrets.SNOWFLAKE_ACCOUNT != '' }}
+        env:
+          SNOWFLAKE_ACCOUNT:   ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER:      ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_ROLE:      ${{ secrets.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_DB:        ${{ secrets.SNOWFLAKE_DB }}
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.dbt
+          # a profiles.yml that reads the secrets from env vars (no hard-coding)
+          cat > ~/.dbt/profiles.yml <<'EOF'
+          banking_dbt:
+            target: prod
+            outputs:
+              prod:
+                type: snowflake
+                account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+                user: "{{ env_var('SNOWFLAKE_USER') }}"
+                role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+                authenticator: SNOWFLAKE_JWT
+                private_key: "{{ env_var('SNOWFLAKE_PRIVATE_KEY') }}"
+                database: "{{ env_var('SNOWFLAKE_DB') }}"
+                warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
+                schema: ANALYTICS
+                threads: 4
+          EOF
+          cd banking_dbt && dbt build
+
+      # If no secrets yet, just say so (keeps the workflow green).
+      - name: Skip notice
+        if: ${{ secrets.SNOWFLAKE_ACCOUNT == '' }}
+        run: echo "No Snowflake secrets set — skipping deploy. Add repo secrets to enable."

@@ -1,0 +1,71 @@
+# =============================================================================
+#  ci.yml  —  CONTINUOUS INTEGRATION
+#  WHAT IT DOES: on every push / pull-request, GitHub spins up a fresh Linux VM
+#  and CHECKS the code BEFORE it can be merged:
+#    1) Python files compile (no syntax errors)
+#    2) the dbt project parses (all ref()/source() resolve, SQL is valid)
+#  If any check fails, the red X blocks the merge. This is the "quality gate".
+#  NOTE: dbt PARSE does not need a live Snowflake — it validates the project
+#  graph offline, so this runs green without any secrets.
+# =============================================================================
+name: CI
+
+# WHEN to run: on pushes and PRs targeting main or dev.
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest          # the throwaway Linux machine GitHub gives us
+    steps:
+      # 1) get the repo's code onto the VM
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2) install Python 3.12
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 3) install dbt (+ the Snowflake adapter)
+      - name: Install dbt
+        run: pip install --no-cache-dir dbt-core dbt-snowflake
+
+      # 4) Python syntax check — fails if any .py file is broken
+      - name: Check Python syntax
+        run: |
+          python -m py_compile \
+            data-geneator/faker_generator.py \
+            kafka-debezium/generate_and_post_connector.py \
+            consumer/kafka_to_minio.py \
+            docker/dags/minio_to_snowflake_dag.py \
+            docker/dags/scd_snapshots.py
+
+      # 5) write a DUMMY dbt profile so `dbt parse` can run WITHOUT a real DB.
+      #    (parse only validates the project; it never connects with these creds.)
+      - name: Create dummy dbt profile
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'EOF'
+          banking_dbt:
+            target: ci
+            outputs:
+              ci:
+                type: snowflake
+                account: dummy
+                user: dummy
+                password: dummy
+                role: dummy
+                database: banking
+                warehouse: dummy
+                schema: ANALYTICS
+                threads: 1
+          EOF
+
+      # 6) validate the whole dbt project (refs, sources, model SQL, tests)
+      - name: dbt parse (validate project)
+        run: cd banking_dbt && dbt deps && dbt parse

@@ -1,35 +1,41 @@
+# =============================================================================
+#  dbt_project.yml  —  the dbt project's main config file.
+#  dbt reads this to know the project name, which connection profile to use,
+#  where the models/snapshots/tests live, and the default materializations.
+# =============================================================================
 
-# Name your project! Project names should contain only lowercase characters
-# and underscores. A good package name should reflect your organization's
-# name or the intended use of these models
+# The project name. Must be lowercase + underscores. Code refers to it (e.g. the
+# models: block below and the profile name).
 name: 'banking_dbt'
 version: '1.0.0'
 
-# This setting configures which "profile" dbt uses for this project.
+# WHICH connection profile to use (from ~/.dbt/profiles.yml). It must contain a
+# profile literally named 'banking_dbt' with the Snowflake account/user/key/etc.
 profile: 'banking_dbt'
 
-# These configurations specify where dbt should look for different types of files.
-# The `model-paths` config, for example, states that models in this project can be
-# found in the "models/" directory. You probably won't need to change these!
-model-paths: ["models"]
+# Where dbt looks for each kind of file. Defaults — you rarely change these.
+model-paths: ["models"]        # your SELECT models (staging + marts) live here
 analysis-paths: ["analyses"]
-test-paths: ["tests"]
-seed-paths: ["seeds"]
-snapshot-paths: ["snapshots"]
+test-paths: ["tests"]          # custom (singular) tests
+seed-paths: ["seeds"]          # CSV seed files
+snapshot-paths: ["snapshots"]  # the SCD2 snapshot files live here
 
-clean-targets:         # directories to be removed by `dbt clean`
+# Folders `dbt clean` deletes (build artifacts + downloaded packages).
+clean-targets:
   - "target"
   - "dbt_packages"
 
-
-# Configuring models
-# Full documentation: https://docs.getdbt.com/docs/configuring-models
-
-# In this example config, we tell dbt to build all models in the example/
-# directory as views. These settings can be overridden in the individual model
-# files using the `{{ config(...) }}` macro.
+# -----------------------------------------------------------------------------
+# Default materializations per folder. Individual models override these with
+# their own {{ config(...) }}. We set sensible defaults:
+#   staging -> view  (light, always fresh)
+#   marts   -> table (queried often by BI, so store them for speed)
+# (This replaces the boilerplate "example:" block, which removed the
+#  "unused configuration paths" warning.)
+# -----------------------------------------------------------------------------
 models:
   banking_dbt:
-    # Config indicated by + and applies to all files under models/example/
-    example:
+    staging:
       +materialized: view
+    marts:
+      +materialized: table
