@@ -1,17 +1,23 @@
-#data-generator
-pyyaml
-psycopg2-binary
-faker
+# =============================================================================
+#  requirements.txt  —  the Python packages this project needs.
+#  Install all at once:  uv pip install -r requirements.txt   (or pip)
+#  Grouped by which part of the pipeline uses them.
+# =============================================================================
 
-#CDC
-python-dotenv
-requests
+# --- Data generator (creates fake data and writes it to Postgres) -----------
+pyyaml            # read YAML config (general helper)
+psycopg2-binary   # PostgreSQL driver — connect + run INSERTs
+faker             # generate realistic fake names / emails
 
-#Consumer
-kafka-python
-boto3
-fastparquet
-pandas
+# --- CDC connector script (registers Debezium via REST) ---------------------
+python-dotenv     # load secrets from .env files (used by every script)
+requests          # send the HTTP POST to the Kafka Connect REST API
 
-#dbt
-dbt-snowflake
+# --- Consumer (Kafka -> MinIO) ----------------------------------------------
+kafka-python      # read messages from Kafka topics
+boto3             # talk to MinIO using the S3 API (upload Parquet)
+fastparquet       # write DataFrames to Parquet files
+pandas            # turn rows into a table (DataFrame) before writing
+
+# --- dbt (transform RAW -> staging -> snapshots -> marts in Snowflake) ------
+dbt-snowflake     # dbt + the Snowflake adapter (pulls in dbt-core too)
